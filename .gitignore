@@ -1,0 +1,10 @@
+# Dependencies & build artifacts
+node_modules/
+dist/
+
+# Local Netlify folder
+.netlify/
+
+# Misc
+.DS_Store
+.vscode/

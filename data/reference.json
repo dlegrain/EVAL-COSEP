@@ -1,0 +1,150 @@
+{
+  "1.1 Description sommaire du chantier": {
+    "value": "Aménagement de quais BUS accessibles PMR à Manhay (RN30) - démolition enrobés, fondations béton maigre, revêtements, bordures IA/IC1, réaménagement drainage et signalisation. [cite_start]Délai total : 35 jours ouvrables. [cite: 1, 198, 202, 419]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.2 Interférences particulières avec le site": {
+    "value": "Chantier en domaine public routier (RN30) avec maintien des circulations bus/piétons ; [cite_start]proximité crèche & bibliothèque; flux TEC à organiser. [cite: 1]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.3 Bâtiment en fonctionnement": {
+    "value": "Pas de bâtiment; site en exploitation trafic. [cite_start]Maintenir accès usagers TEC et riverains durant travaux. [cite: 1]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.4 Zones à risques spécifiques (MO)": {
+    "value": "Présence d'impétrants : PROXIMUS, réseaux humides (avaloirs/CV). [cite_start]DICT, repérage et piquetage obligatoires. [cite: 1]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.5 Amiante": {
+    "value": "Non signalée dans les documents. [cite_start]Vigilance en cas de découverte fortuite (procédure stop-work). [cite: 1]",
+    "Description (synthèse exploitable)": "Faible"
+  },
+  "1.6 Plans des impétrants": {
+    "value": "Demande auprès gestionnaires + localisation par terrassement par aspiration. [cite_start]Tenir plans à jour au journal. [cite: 1, 1278]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.7 Légionellose": {
+    "value": "[cite_start]Sans objet (pas de réseaux ECS). [cite: 1]",
+    "Description (synthèse exploitable)": "Faible"
+  },
+  "1.8 Prévention incendie généralités": {
+    "value": "Application Loi bien-être + AR 25/01/2001; [cite_start]PSS obligatoire en offre et en exécution. [cite: 1, 380, 381]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.9 Permis de feu": {
+    "value": "Rarement requis (travaux voirie). [cite_start]À activer si point chaud (soudure/thermique imprévus). [cite: 1]",
+    "Description (synthèse exploitable)": "Faible"
+  },
+  "1.10 Détection incendie": {
+    "value": "[cite_start]Sans objet (extérieur). [cite: 2]",
+    "Description (synthèse exploitable)": "Faible"
+  },
+  "1.11 Poussières / silice": {
+    "value": "[cite_start]Sciage enrobés/béton, terrassements: prévoir arrosage, aspiration à la source, FFP3, balisage. [cite: 2]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.12 Ordre & propreté (Housekeeping)": {
+    "value": "[cite_start]Nettoyage quotidien; bouches d'avaloirs protégées. [cite: 2]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.13 Gestion des déchets": {
+    "value": "Filières agréées (enrobés, bétons, C&D en mélange, terres). AGW « Terres » + Walterre si traçabilité requise. [cite_start]Pénalité spéciale de 500 €/camion pour manquement bons d'évacuation. [cite: 2, 817, 887, 888]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.14 Vibrations / Nuisances sonores": {
+    "value": "[cite_start]Sciage/compactage; voisinage sensible (crèche) - plages horaires, écrans, information riverains. [cite: 2]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.15 Travaux en hauteur": {
+    "value": "[cite_start]Non concerné (travaux au sol). [cite: 2]",
+    "Description (synthèse exploitable)": "Faible"
+  },
+  "1.16 Manutentions": {
+    "value": "[cite_start]Bordures IA/IC1, pavés, dalles: moyens de levage, manutention collective, balisage. [cite: 2]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.17 Fiches de données de sécurité": {
+    "value": "FDS pour produits (bitumes, peintures, nettoyants). [cite_start]Stockages sécurisés. [cite: 2]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.18 Consignations / LOTO": {
+    "value": "[cite_start]À prévoir uniquement pour interventions en regards (gaz/ATEX) ; détecteur gaz + tripode/antichute si descente. [cite: 2]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.19 Installation de chantier - généralités": {
+    "value": "[cite_start]Plan d'installation: bases-vie, dépôt matériaux, accès engins, aire de levage, zones piétons protégées. [cite: 2]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.20 Circulations (piétons & véhicules)": {
+    "value": "[cite_start]Plan de signalisation temporaire (PST) RN30; vitesses réduites, alternat si besoin, cheminements PMR provisoires. [cite: 3]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.21 Clôtures / balisages": {
+    "value": "[cite_start]Barriérage piéton continu, écrans latéraux, cônes/AK; marquage chantier de nuit si phases nocturnes. [cite: 3]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "1.22 Stockages": {
+    "value": "Stockages identifiés (pavés, bordures, enrobés). [cite_start]Retenue pollution; zones terres conformes CCQT/AGW. [cite: 3]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.23 Postes de travail": {
+    "value": "[cite_start]État des lieux avant/après; zones dégagées; protection des tiers; postes au plus près pour limiter port de charges. [cite: 3]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.24 Équipements de travail": {
+    "value": "[cite_start]Conformité Qualiroutes; contrôle périodique; marquage entreprise sur matériels. [cite: 3]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.25 EPI": {
+    "value": "[cite_start]EPI de base: casque, chaussures S3, HV, gants adaptés, lunettes, protections auditives, FFP3 selon tâches. [cite: 3]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "1.26 Intervention en toiture": {
+    "value": "[cite_start]Sans objet. [cite: 3]",
+    "Description (synthèse exploitable)": "Faible"
+  },
+  "1.27 Raccordements électriques": {
+    "value": "Réception par organisme agréé si intervention; [cite_start]RGIE; sécuriser bornes/armoires proches. [cite: 3, 417]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "III. DIU-As-built & récolement": {
+    "value": "[cite_start]Plans « as-built » DWG/DXF + levé topographique Lambert[cite: 635], dossier de récolement (ouvrages enterrés, altimétries). [cite_start]Fourniture des plans As-built, condition de réception provisoire. [cite: 3, 651]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "IV. Évaluation risques entreprises (PSS/PPSS)": {
+    "value": "PPSS par métier (voirie, signalisation, enrobés, drainage); intégration phasage & PST; coordination CSS. [cite_start]Agrégation requise : Catégorie C, Classe 1. [cite: 3, 259]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "V. Divers - Déclaration préalable / Langue": {
+    "value": "[cite_start]DUC [cite: 4][cite_start]; langue FR[cite: 4]; signatures électroniques qualifiées; e-Procurement.",
+    "Description (synthèse exploitable)": "Faible"
+  },
+  "VI. Concertations Réunions - Visites": {
+    "value": "Journal de coordination; réunions de phasage avec SPW/TEC; avis riverains/ERP.",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "A. Accessibilité PMR - exigences projet": {
+    "value": "[cite_start]Saillie bordure IA+16 cm; dalles podotactiles (ligne d'éveil, guidage, information); pentes rampe 7,31-7,78%; dévers 2%. [cite: 4]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "B. Signalisation temporaire spécifique RN30": {
+    "value": "[cite_start]PST validé SPW: phases distinctes, limitations, dispositifs d'arrêt d'urgence, traversées protégées; alternat/couloirs bus si requis. [cite: 4]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "C. Interfaces & coordinations": {
+    "value": "[cite_start]SPW (RN30), TEC (arrêts, poteau), PROXIMUS (réseaux), commune/riverains (crèche, bibliothèque). [cite: 4]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "D. Essais & contrôles": {
+    "value": "Altimétries HB/BB & saillie 16 cm; [cite_start]épaisseurs enrobés, compaction; réception drainage; conformité PMR tactile. [cite: 4]",
+    "Description (synthèse exploitable)": "Moyen"
+  },
+  "E. Déchets - traçabilité": {
+    "value": "[cite_start]Bons d'évacuation en continu; centres CTA/CET; formulaires statistiques SPW; pénalités si manquements. [cite: 4]",
+    "Description (synthèse exploitable)": "Élevé"
+  },
+  "F. Capacité de Tiers": {
+    "value": "[cite_start]Responsabilité solidaire de l'adjudicataire et de l'entité tierce dont la capacité est invoquée pour la capacité économique et financière. [cite: 263, 267]",
+    "Description (synthèse exploitable)": "Moyen"
+  }
+}
