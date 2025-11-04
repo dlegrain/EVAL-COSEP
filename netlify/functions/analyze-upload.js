@@ -257,7 +257,10 @@ const appendToGoogleSheet = async ({
       },
     });
 
-    return { success: true };
+    return {
+      success: true,
+      message: 'Résultat archivé dans Google Sheets.',
+    };
   } catch (error) {
     console.error('Erreur Google Sheets:', error.message);
     return { success: false, message: `Echec archivage Google Sheets: ${error.message}` };

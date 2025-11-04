@@ -16,8 +16,7 @@ const DOCUMENT_LINKS = [
   {
     label: 'Plan du projet (PDF)',
     href: '/documents/plan.pdf',
-    description: 'Ajoutez le plan ici lorsque disponible.',
-    pending: true,
+    description: 'Plan de situation AE-868.',
   },
 ];
 
@@ -54,6 +53,7 @@ export default function App() {
   const [status, setStatus] = useState('idle'); // idle | working | success | error
   const [analysis, setAnalysis] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const participantLabel = useMemo(() => `${firstName.trim()} ${lastName.trim()}`.trim(), [firstName, lastName]);
 
   useEffect(() => {
     if (!startTime) {
@@ -77,6 +77,48 @@ export default function App() {
 
   const hasExceededTime = elapsedMs > THIRTY_MINUTES_MS;
   const formattedElapsed = useMemo(() => formatDuration(elapsedMs), [elapsedMs]);
+  const reportContent = useMemo(() => {
+    if (!analysis) {
+      return '';
+    }
+    const lines = [];
+    lines.push('=== Evaluation EVAL COSEP ===');
+    const submitted = analysis.elapsed?.submittedAt ? new Date(analysis.elapsed.submittedAt) : new Date();
+    lines.push(`Date de soumission : ${submitted.toLocaleString()}`);
+    if (participantLabel) {
+      lines.push(`Participant : ${participantLabel}`);
+    }
+    lines.push(`Score global : ${analysis.score?.toFixed(1) ?? '0.0'} %`);
+    lines.push(`Temps écoulé : ${analysis.elapsed?.formatted ?? formattedElapsed}`);
+    if (analysis.storage) {
+      lines.push(
+        `Archivage du fichier : ${
+          analysis.storage.location ?? analysis.storage.message ?? 'Information non disponible'
+        }`
+      );
+    }
+    if (analysis.sheet) {
+      lines.push(
+        `Enregistrement Google Sheets : ${
+          analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')
+        }`
+      );
+    }
+    lines.push('');
+    lines.push('--- Détails par section ---');
+    if (analysis.details?.length) {
+      analysis.details.forEach((detail, index) => {
+        lines.push(
+          `${index + 1}. ${detail.section} — Score: ${detail.score ?? 'N/A'}% | ${detail.message}${
+            detail.expected ? ` | Attendu: ${detail.expected}` : ''
+          }${detail.received ? ` | Reçu: ${detail.received}` : ''}`
+        );
+      });
+    } else {
+      lines.push('Toutes les sections attendues ont été retrouvées.');
+    }
+    return lines.join('\n');
+  }, [analysis, formattedElapsed, participantLabel]);
 
   const canStartMission = firstName.trim().length > 0 && lastName.trim().length > 0;
 
@@ -147,6 +189,12 @@ export default function App() {
       }
 
       const result = await response.json();
+      if (result?.sheet) {
+        console.info('Résultat Google Sheet:', result.sheet);
+      }
+      if (result?.storage) {
+        console.info('Archivage du fichier:', result.storage);
+      }
       setAnalysis(result);
       setStatus('success');
       setPhase('submitted');
@@ -156,6 +204,21 @@ export default function App() {
       setStatus('error');
       setErrorMessage(error.message || 'Une erreur est survenue pendant la soumission.');
     }
+  };
+
+  const handleDownloadReport = () => {
+    if (!analysis) {
+      return;
+    }
+    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const safeName = participantLabel.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'participant';
+    const filename = `rapport-eval-cosep-${safeName}.txt`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -203,21 +266,12 @@ export default function App() {
             <p>Documents disponibles :</p>
             <div className="links">
               {DOCUMENT_LINKS.map((doc) => (
-                <a
-                  key={doc.label}
-                  href={doc.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-disabled={doc.pending}
-                  onClick={(event) => {
-                    if (doc.pending) {
-                      event.preventDefault();
-                    }
-                  }}
-                >
-                  {doc.label}
-                  {doc.pending ? ' — à compléter' : ''}
-                </a>
+                <div key={doc.label} className="link-item">
+                  <a href={doc.href} target="_blank" rel="noreferrer">
+                    {doc.label}
+                  </a>
+                  {doc.description && <span className="link-description">{doc.description}</span>}
+                </div>
               ))}
             </div>
           </div>
@@ -253,21 +307,43 @@ export default function App() {
         <div className="card">
           <h2>4. Résultat de l’analyse</h2>
           <div className="results">
-            <p>
-              Score de conformité : <strong>{analysis.score?.toFixed(1) ?? '0.0'}%</strong>
+            <div className="results-header">
+              <div>
+                <p className="participant">{participantLabel || 'Participant'}</p>
+                <p className="timestamp">
+                  Soumis le{' '}
+                  {analysis.elapsed?.submittedAt
+                    ? new Date(analysis.elapsed.submittedAt).toLocaleString()
+                    : new Date().toLocaleString()}
+                </p>
+              </div>
+              <div
+                className={`score-badge ${
+                  analysis.score >= 80 ? 'score-good' : analysis.score >= 50 ? 'score-medium' : 'score-low'
+                }`}
+              >
+                {analysis.score?.toFixed(1) ?? '0.0'}%
+              </div>
+            </div>
+            <p className="elapsed">
+              Temps enregistré : {analysis.elapsed?.formatted ?? formattedElapsed}{' '}
+              {analysis.elapsed?.ms > THIRTY_MINUTES_MS ? '(hors délai)' : ''}
             </p>
-            <p>Temps enregistré : {analysis.elapsed?.formatted ?? formattedElapsed}</p>
             {analysis.details?.length ? (
-              <>
-                <h3>Détails</h3>
-                <ul>
-                  {analysis.details.map((detail) => (
-                    <li key={detail.section}>
-                      <strong>{detail.section} :</strong> {detail.message}
-                    </li>
-                  ))}
-                </ul>
-              </>
+              <div className="details-table">
+                <div className="details-header">
+                  <span>Section</span>
+                  <span>Score</span>
+                  <span>Commentaire</span>
+                </div>
+                {analysis.details.map((detail) => (
+                  <div key={`${detail.section}-${detail.message}`} className="details-row">
+                    <span className="details-section">{detail.section}</span>
+                    <span className="details-score">{detail.score ?? 'N/A'}%</span>
+                    <span className="details-comment">{detail.message}</span>
+                  </div>
+                ))}
+              </div>
             ) : (
               <p>Toutes les sections attendues ont été retrouvées.</p>
             )}
@@ -276,6 +352,14 @@ export default function App() {
                 Copie du fichier : {analysis.storage.location ?? analysis.storage.message ?? 'enregistrée.'}
               </p>
             )}
+            {analysis.sheet && (
+              <p className="status">
+                Archivage Google Sheets : {analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')}
+              </p>
+            )}
+            <button type="button" className="secondary download" onClick={handleDownloadReport}>
+              Télécharger le rapport (.txt)
+            </button>
           </div>
         </div>
       )}
