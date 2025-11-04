@@ -44,9 +44,18 @@ Ce document récapitule les étapes majeures échangées avec Codex pendant la m
 - Création de `docs/README.md` (architecture détaillée).
 - Présent document (`docs/conversation-summary.md`) retraçant les échanges clés.
 
+## Phase 6 · Améliorations ultérieures
+- Ajout du plan AE-868 et verrouillage de la session utilisateur une fois le chrono démarré.
+- Refonte du rendu des résultats : badge de score, tableau détaillé, génération d’un rapport PDF (jsPDF + autotable).
+- Résumé Google Sheets enrichi (top 5 des écarts avec scores) pour tracer davantage d’informations.
+
+## Phase 7 · Analyse collaboration humain–IA
+- Nouvelle étape front pour coller le transcript complet du dialogue avec l’IA et déclencher une analyse critique.
+- Création de `netlify/functions/analyze-collaboration.js` : heuristiques 0–5 sur 6 critères, archivage des conversations, export Google Sheets.
+- Affichage d’un tableau des scores, listes de points forts/faiblesses et intégration du diagnostic dans le PDF téléchargeable.
+
 ## Points en suspens / évolutions envisagées
 - Intégration du plan réel (`public/documents/plan.pdf`).
 - Ajustements des seuils de similarité selon les exigences métier.
-- Phase 2 évoquée (peut inclure IA ou nouvelles étapes d’évaluation).
-
+- Intégration potentielle d’une IA externe pour affiner l’analyse de collaboration.
 

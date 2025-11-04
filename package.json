@@ -27,8 +27,10 @@
     "@netlify/blobs": "^6.3.0",
     "@netlify/functions": "^2.4.0",
     "googleapis": "^129.0.0",
+    "jspdf": "^2.5.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "jspdf-autotable": "^3.8.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

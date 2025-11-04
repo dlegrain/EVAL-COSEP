@@ -3,7 +3,8 @@
 Plateforme d’évaluation destinée à mesurer la capacité d’un utilisateur à extraire et structurer les informations d’un cahier des charges. Elle comprend :
 
 - un front React/Vite servant l’interface d’évaluation (identification, accès aux documents, chrono 30 min, dépôt d’un Excel libre) ;
-- une fonction Netlify qui analyse l’Excel fourni en le comparant au référentiel validé (issu de `data/infos extraites CSS.xlsx`) avec une métrique de similarité tolérante, génère un rapport détaillé et enregistre le résultat.
+- une fonction Netlify pour l’analyse de l’Excel fourni (`netlify/functions/analyze-upload.js`) : comparaison vs référence, scoring, rapport PDF, archivage Blobs/Google Sheets ;
+- une seconde fonction Netlify dédiée à la collaboration humain–IA (`netlify/functions/analyze-collaboration.js`) qui évalue la qualité du dialogue avec l’IA (scores 0–5, conseils personnalisés, archivage).
 
 Une documentation plus exhaustive est disponible dans `docs/README.md`.
 
@@ -91,4 +92,4 @@ La fonction utilise `@netlify/blobs` pour conserver une copie du fichier Excel s
 
 - Ajouter le plan réel (`public/documents/plan.pdf`) ou adapter les liens dans `src/App.jsx`.
 - Ajuster la pondération/les seuils de similarité dans la fonction d’analyse selon les retours.
-- Brancher un moteur IA (Gemini, etc.) pour scorer du texte libre ou fournir des feedbacks qualitatifs.
+- Brancher un moteur IA externe (Gemini, Vertex, etc.) pour enrichir encore l’analyse de collaboration.

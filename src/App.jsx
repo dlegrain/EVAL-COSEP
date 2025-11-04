@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 const STORAGE_KEYS = {
   firstName: 'eval-cosep:firstName',
@@ -54,6 +56,10 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const participantLabel = useMemo(() => `${firstName.trim()} ${lastName.trim()}`.trim(), [firstName, lastName]);
+  const [collabText, setCollabText] = useState('');
+  const [collabStatus, setCollabStatus] = useState('idle');
+  const [collabError, setCollabError] = useState('');
+  const [collaboration, setCollaboration] = useState(null);
 
   useEffect(() => {
     if (!startTime) {
@@ -77,50 +83,8 @@ export default function App() {
 
   const hasExceededTime = elapsedMs > THIRTY_MINUTES_MS;
   const formattedElapsed = useMemo(() => formatDuration(elapsedMs), [elapsedMs]);
-  const reportContent = useMemo(() => {
-    if (!analysis) {
-      return '';
-    }
-    const lines = [];
-    lines.push('=== Evaluation EVAL COSEP ===');
-    const submitted = analysis.elapsed?.submittedAt ? new Date(analysis.elapsed.submittedAt) : new Date();
-    lines.push(`Date de soumission : ${submitted.toLocaleString()}`);
-    if (participantLabel) {
-      lines.push(`Participant : ${participantLabel}`);
-    }
-    lines.push(`Score global : ${analysis.score?.toFixed(1) ?? '0.0'} %`);
-    lines.push(`Temps écoulé : ${analysis.elapsed?.formatted ?? formattedElapsed}`);
-    if (analysis.storage) {
-      lines.push(
-        `Archivage du fichier : ${
-          analysis.storage.location ?? analysis.storage.message ?? 'Information non disponible'
-        }`
-      );
-    }
-    if (analysis.sheet) {
-      lines.push(
-        `Enregistrement Google Sheets : ${
-          analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')
-        }`
-      );
-    }
-    lines.push('');
-    lines.push('--- Détails par section ---');
-    if (analysis.details?.length) {
-      analysis.details.forEach((detail, index) => {
-        lines.push(
-          `${index + 1}. ${detail.section} — Score: ${detail.score ?? 'N/A'}% | ${detail.message}${
-            detail.expected ? ` | Attendu: ${detail.expected}` : ''
-          }${detail.received ? ` | Reçu: ${detail.received}` : ''}`
-        );
-      });
-    } else {
-      lines.push('Toutes les sections attendues ont été retrouvées.');
-    }
-    return lines.join('\n');
-  }, [analysis, formattedElapsed, participantLabel]);
 
-  const canStartMission = firstName.trim().length > 0 && lastName.trim().length > 0;
+  const canStartMission = phase === 'identify' && firstName.trim().length > 0 && lastName.trim().length > 0;
 
   const handleStartMission = () => {
     if (!canStartMission) {
@@ -132,18 +96,6 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.phase, 'mission');
     localStorage.setItem(STORAGE_KEYS.startTime, String(now));
     setElapsedMs(0);
-  };
-
-  const handleReset = () => {
-    localStorage.removeItem(STORAGE_KEYS.startTime);
-    localStorage.setItem(STORAGE_KEYS.phase, 'identify');
-    setStartTime(null);
-    setElapsedMs(0);
-    setPhase('identify');
-    setAnalysis(null);
-    setStatus('idle');
-    setErrorMessage('');
-    setFile(null);
   };
 
   const handleFileChange = (event) => {
@@ -203,6 +155,188 @@ export default function App() {
       console.error(error);
       setStatus('error');
       setErrorMessage(error.message || 'Une erreur est survenue pendant la soumission.');
+    }
+  };
+
+  const handleDownloadPdf = () => {
+    if (!analysis) {
+      return;
+    }
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const marginX = 48;
+    let cursorY = 60;
+
+    doc.setFontSize(18);
+    doc.text('Rapport d’évaluation EVAL COSEP', marginX, cursorY);
+    cursorY += 28;
+
+    doc.setFontSize(12);
+    doc.text(`Participant : ${participantLabel || 'Non renseigné'}`, marginX, cursorY);
+    cursorY += 18;
+    doc.text(
+      `Soumission : ${
+        analysis.elapsed?.submittedAt ? new Date(analysis.elapsed.submittedAt).toLocaleString() : new Date().toLocaleString()
+      }`,
+      marginX,
+      cursorY
+    );
+    cursorY += 18;
+    doc.text(`Score global : ${(analysis.score ?? 0).toFixed(1)} %`, marginX, cursorY);
+    cursorY += 18;
+    doc.text(`Temps écoulé : ${analysis.elapsed?.formatted ?? formattedElapsed}`, marginX, cursorY);
+    cursorY += 28;
+
+    const details = analysis.details?.length
+      ? analysis.details.map((detail) => [
+          detail.section,
+          detail.score !== undefined ? `${detail.score}%` : 'N/A',
+          detail.message,
+        ])
+      : [['Toutes les sections attendues', '100%', 'Aucun écart détecté']];
+
+    doc.autoTable({
+      startY: cursorY,
+      head: [['Section', 'Score', 'Commentaire']],
+      body: details,
+      headStyles: { fillColor: [0, 88, 255], textColor: 255 },
+      styles: { fontSize: 10, cellPadding: 6 },
+      columnStyles: {
+        0: { cellWidth: 200 },
+        1: { cellWidth: 70, halign: 'center' },
+        2: { cellWidth: 230 },
+      },
+    });
+
+    cursorY = doc.lastAutoTable.finalY + 20;
+
+    if (analysis.storage || analysis.sheet) {
+      doc.setFontSize(12);
+      doc.text('Traçabilité :', marginX, cursorY);
+      cursorY += 16;
+      if (analysis.storage) {
+        doc.text(
+          `• Archivage du fichier : ${analysis.storage.location ?? analysis.storage.message ?? 'Information indisponible'}`,
+          marginX,
+          cursorY
+        );
+        cursorY += 14;
+      }
+      if (analysis.sheet) {
+        doc.text(
+          `• Archivage Google Sheets : ${
+            analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')
+          }`,
+          marginX,
+          cursorY
+        );
+        cursorY += 14;
+      }
+      cursorY += 10;
+    }
+
+    if (collaboration) {
+      if (cursorY > 620) {
+        doc.addPage();
+        cursorY = 60;
+      }
+
+      doc.setFontSize(16);
+      doc.text('Analyse collaboration humain–IA', marginX, cursorY);
+      cursorY += 24;
+
+      const collabRows = Object.entries(collaboration.scores || {}).map(([key, value]) => [
+        key,
+        `${value.score.toFixed(1)}/5`,
+        value.comment,
+      ]);
+
+      if (collabRows.length) {
+        doc.autoTable({
+          startY: cursorY,
+          head: [['Critère', 'Score', 'Commentaire']],
+          body: collabRows,
+          headStyles: { fillColor: [29, 42, 74], textColor: 255 },
+          styles: { fontSize: 10, cellPadding: 6 },
+          columnStyles: {
+            0: { cellWidth: 160 },
+            1: { cellWidth: 70, halign: 'center' },
+            2: { cellWidth: 260 },
+          },
+        });
+        cursorY = doc.lastAutoTable.finalY + 20;
+      }
+
+      const advice = collaboration.advice || {};
+      const listSection = (title, items) => {
+        if (!items || items.length === 0) {
+          return;
+        }
+        if (cursorY > 720) {
+          doc.addPage();
+          cursorY = 60;
+        }
+        doc.setFontSize(12);
+        doc.text(title, marginX, cursorY);
+        cursorY += 16;
+        items.forEach((item) => {
+          doc.text(`• ${item}`, marginX, cursorY);
+          cursorY += 14;
+        });
+        cursorY += 12;
+      };
+
+      listSection('Points forts', advice.strengths);
+      listSection('Axes d’amélioration', advice.improvements);
+      listSection('Recommandations', advice.tips);
+    }
+
+    const safeName = participantLabel.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'participant';
+    doc.save(`rapport-eval-cosep-${safeName}.pdf`);
+  };
+
+  const handleCollaborationSubmit = async (event) => {
+    event.preventDefault();
+    if (!analysis) {
+      setCollabError("Merci de terminer l'analyse de l'extraction avant de passer à l'étape 2.");
+      return;
+    }
+    if (!collabText.trim()) {
+      setCollabError("Veuillez coller la conversation complète avec l'IA avant de lancer l'analyse.");
+      return;
+    }
+
+    setCollabStatus('working');
+    setCollabError('');
+
+    try {
+      const payload = {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        transcript: collabText.trim(),
+        extractionScore: analysis.score ?? 0,
+        submittedAt: Date.now(),
+      };
+
+      const response = await fetch('/.netlify/functions/analyze-collaboration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Impossible d'analyser la collaboration pour le moment.");
+      }
+
+      const result = await response.json();
+      setCollaboration(result);
+      setCollabStatus('success');
+      setCollabError('');
+    } catch (error) {
+      console.error(error);
+      setCollabStatus('error');
+      setCollabError(error.message || "Analyse collaboration impossible pour le moment.");
     }
   };
 
@@ -278,9 +412,9 @@ export default function App() {
           <p className="status pad-top">
             Préparez votre analyse dans votre propre tableur Excel. La restitution doit être exhaustive et vérifiable.
           </p>
-          <button className="secondary pad-top" type="button" onClick={handleReset}>
-            Réinitialiser la session
-          </button>
+          <p className="status note-lock">
+            Cette session est verrouillée après démarrage. Veillez à finaliser votre extraction avant de déposer votre fichier.
+          </p>
         </div>
       )}
 
@@ -357,10 +491,104 @@ export default function App() {
                 Archivage Google Sheets : {analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')}
               </p>
             )}
-            <button type="button" className="secondary download" onClick={handleDownloadReport}>
-              Télécharger le rapport (.txt)
+            <button type="button" className="primary download" onClick={handleDownloadPdf}>
+              Télécharger le rapport PDF
             </button>
           </div>
+        </div>
+      )}
+
+      {analysis && (
+        <div className="card">
+          <h2>5. Analyse de la collaboration humain–IA</h2>
+          <p>
+            Collez ci-dessous l’intégralité de votre échange avec l’IA (ChatGPT, Gemini, etc.). Le système analyse la qualité de
+            la collaboration et vous fournit un diagnostic critique.
+          </p>
+          <form onSubmit={handleCollaborationSubmit}>
+            <textarea
+              value={collabText}
+              onChange={(event) => setCollabText(event.target.value)}
+              placeholder="Collez ici votre conversation complète, dans l’ordre chronologique."
+              rows={14}
+            />
+            <p className="status">
+              Les informations sont traitées localement pour cette évaluation et ne sont pas partagées publiquement.
+            </p>
+            <button className="primary" type="submit" disabled={collabStatus === 'working'}>
+              {collabStatus === 'working' ? 'Analyse de la collaboration…' : 'Analyser la collaboration'}
+            </button>
+          </form>
+          {collabError && <div className="error">{collabError}</div>}
+
+          {collaboration && (
+            <div className="collab-results">
+              <div className="collab-overview">
+                <span className="collab-overall">
+                  Score global collaboration : {collaboration.overall?.toFixed(1) ?? '0.0'}/5
+                </span>
+                {collaboration.storage && (
+                  <span className="collab-status">
+                    Archivage conversation : {collaboration.storage.location ?? collaboration.storage.message ?? 'n/a'}
+                  </span>
+                )}
+                {collaboration.sheet && (
+                  <span className="collab-status">
+                    Google Sheets : {collaboration.sheet.message ?? (collaboration.sheet.success ? 'Enregistré.' : 'Non enregistré.')}
+                  </span>
+                )}
+              </div>
+              <div className="collab-table">
+                <div className="collab-header">
+                  <span>Critère</span>
+                  <span>Score /5</span>
+                  <span>Commentaire</span>
+                </div>
+                {Object.entries(collaboration.scores || {}).map(([key, value]) => (
+                  <div key={key} className="collab-row">
+                    <span className="collab-criterion">{value.label || key}</span>
+                    <span className="collab-score">{value.score.toFixed(1)}</span>
+                    <span className="collab-comment">{value.comment}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="collab-advice">
+                {collaboration.advice?.strengths?.length ? (
+                  <div>
+                    <h3>Points forts</h3>
+                    <ul>
+                      {collaboration.advice.strengths.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {collaboration.advice?.improvements?.length ? (
+                  <div>
+                    <h3>Axes d’amélioration</h3>
+                    <ul>
+                      {collaboration.advice.improvements.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {collaboration.advice?.tips?.length ? (
+                  <div>
+                    <h3>Conseils personnalisés</h3>
+                    <ul>
+                      {collaboration.advice.tips.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

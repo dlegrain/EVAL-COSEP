@@ -9,6 +9,7 @@ Ce dossier rassemble les informations détaillées pour comprendre, maintenir et
 | Front web | Application Vite + React monopage. Gestion de l’identification, du chrono, des liens vers les documents et de l’upload du fichier Excel de restitution. | `src/App.jsx`, `src/styles.css` |
 | Fonction d’analyse | Netlify Function Node qui convertit l’Excel en JSON, rapproche les sections avec le référentiel, calcule un score et génère un feedback détaillé. | `netlify/functions/analyze-upload.js`, `data/reference.json` |
 | Données de référence | JSON produit à partir de l’Excel validé (référence métier). | `data/reference.json`, `reference-generator.js` |
+| Analyse collaboration IA | Netlify Function évaluant la qualité du dialogue humain–IA à partir du transcript collé (scoring 0–5, conseils, archivage). | `netlify/functions/analyze-collaboration.js` |
 | Stockage d’archives | Netlify Blobs (`@netlify/blobs`) pour conserver une copie du fichier Excel remis. | Même fonction serverless |
 | Export résultats | Append vers un Google Sheet via Google API (service account). | `netlify/functions/analyze-upload.js` |
 
@@ -108,6 +109,18 @@ Les seuils/messageries sont dans `buildComparison`.
   Format de la ligne : `[ISO datetime, firstName, lastName, "Xm Ys", score, summary]`.
   - `summary` compile les trois premiers écarts (`section: message`).
   - En cas d’erreur d’authentification, l’information remonte côté front.
+
+### 3.6 Analyse collaboration humain–IA
+
+- `netlify/functions/analyze-collaboration.js`
+  - Reçoit le transcript complet (texte brut) collé par l’utilisateur.
+  - Analyse heuristique : segmentation en tours, comptage de mots/questions, détection de mots-clés (objectif, conseil, réaction…).
+  - Calcule six scores normalisés 0–5 (intention, dialogue, conseils, réaction, richesse, délégation) + score global.
+  - Produit un diagnostic (commentaires + listes points forts / axes d’amélioration / conseils personnalisés).
+  - Archive la conversation dans Netlify Blobs (`cosep-uploads/collaboration/...`).
+  - Enregistre un résumé dans Google Sheets (type de ligne `collaboration`, score converti /100, synthèse critique).
+
+- Le front consomme la réponse pour afficher un tableau des scores, les listes de recommandations et autorise le téléchargement d’un PDF consolidé.
 
 ## 4. Utilitaires
 

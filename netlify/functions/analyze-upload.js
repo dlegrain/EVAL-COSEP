@@ -288,11 +288,16 @@ export const handler = async (event) => {
     const userEntries = parseUserWorkbook(buffer);
     const comparison = buildComparison(userEntries);
 
-    const summary =
-      comparison.details
-        .slice(0, 3)
-        .map((issue) => `${issue.section}: ${issue.message}`)
-        .join(' | ') || 'Aucun écart significatif détecté.';
+    const summaryItems = comparison.details
+      .slice(0, 5)
+      .map((issue) => {
+        const scoreLabel = issue.score !== undefined ? `${issue.score}%` : 'n.c.';
+        return `${issue.section} (${scoreLabel}) → ${issue.message}`;
+      });
+
+    const summary = summaryItems.length
+      ? summaryItems.join(' | ')
+      : 'Aucun écart significatif détecté.';
 
     const storage = await storeUploadedFile(fileName, buffer, {
       firstName,
