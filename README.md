@@ -5,6 +5,7 @@ Plateforme d’évaluation destinée à mesurer la capacité d’un utilisateur 
 - un front React/Vite servant l’interface d’évaluation (identification, accès aux documents, chrono 30 min, dépôt d’un Excel libre) ;
 - une fonction Netlify pour l’analyse de l’Excel fourni (`netlify/functions/analyze-upload.js`) : comparaison vs référence, scoring, rapport PDF, archivage Blobs/Google Sheets ;
 - une seconde fonction Netlify dédiée à la collaboration humain–IA (`netlify/functions/analyze-collaboration.js`) qui évalue la qualité du dialogue avec l’IA (scores 0–5, conseils personnalisés, archivage).
+- une troisième fonction Netlify pour la preuve d’accès à Canvas sur ChatGPT (`netlify/functions/detect-canvas-icon.js`) qui analyse une capture d’écran via Gemini et valide la présence de l’icône « Canvas ».
 
 Une documentation plus exhaustive est disponible dans `docs/README.md`.
 
@@ -64,6 +65,7 @@ npm run dev -- --host 127.0.0.1 --port 5174
 
 - **Build statique** : Netlify exécute `npm run build` (Vite) et publie `dist` sur le CDN.
 - **Functions** : chaque fichier dans `netlify/functions/` est exposé sous `/.netlify/functions/<nom>` ; ici `analyze-upload`.
+  - Endpoints additionnels: `analyze-collaboration`, `evaluate-legal-training`, `detect-canvas-icon`.
 
 ## Variables d’environnement (Google Sheets)
 
@@ -74,6 +76,17 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | `GOOGLE_SHEETS_ID` | Identifiant du Google Sheet destinataire |
 
 Sans ces variables, l’analyse fonctionne mais l’archivage dans Google Sheets est désactivé (un message est renvoyé à l’utilisateur).
+
+## Variables d’environnement (Gemini)
+
+| Variable | Description |
+| --- | --- |
+| `GEMINI_API_KEY` | Clé API Google Generative AI utilisée par les fonctions (analyse, législation, détection Canvas). |
+
+## Module 4 — Preuve Canvas
+
+- Dans l’interface, chargez une capture d’écran de la zone de saisie ChatGPT montrant l’outil « Canvas ».
+- L’endpoint `/.netlify/functions/detect-canvas-icon` utilise le modèle `gemini-2.5-flash-preview-image` pour détecter l’icône et renvoie `{ canvasDetected, confidence, evidence }`.
 
 ## Stockage des fichiers utilisateurs
 

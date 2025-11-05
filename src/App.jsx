@@ -5,8 +5,8 @@ import 'jspdf-autotable';
 const STORAGE_KEYS = {
   firstName: 'eval-cosep:firstName',
   lastName: 'eval-cosep:lastName',
-  startTime: 'eval-cosep:startTime',
-  phase: 'eval-cosep:phase',
+  currentView: 'eval-cosep:currentView',
+  currentModule: 'eval-cosep:currentModule',
 };
 
 const DOCUMENT_LINKS = [
@@ -23,6 +23,7 @@ const DOCUMENT_LINKS = [
 ];
 
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+const TEN_MINUTES_MS = 10 * 60 * 1000;
 
 const formatDuration = (ms) => {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -39,57 +40,70 @@ const toBase64 = (file) =>
     reader.readAsDataURL(file);
   });
 
+const getScoreColor = (score) => {
+  if (score >= 95) return '#22c55e'; // vert
+  if (score >= 90) return '#f97316'; // orange
+  return '#ef4444'; // rouge
+};
+
 export default function App() {
   const [firstName, setFirstName] = useState(() => localStorage.getItem(STORAGE_KEYS.firstName) || '');
   const [lastName, setLastName] = useState(() => localStorage.getItem(STORAGE_KEYS.lastName) || '');
-  const [phase, setPhase] = useState(() => localStorage.getItem(STORAGE_KEYS.phase) || 'identify');
-  const [startTime, setStartTime] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.startTime);
-    return saved ? Number(saved) : null;
-  });
-  const [elapsedMs, setElapsedMs] = useState(() => {
-    const savedStart = localStorage.getItem(STORAGE_KEYS.startTime);
-    return savedStart ? Date.now() - Number(savedStart) : 0;
-  });
+  const [currentView, setCurrentView] = useState(() => localStorage.getItem(STORAGE_KEYS.currentView) || 'identify');
+  const [currentModule, setCurrentModule] = useState(() => localStorage.getItem(STORAGE_KEYS.currentModule) || null);
+
+  const participantLabel = useMemo(() => `${firstName.trim()} ${lastName.trim()}`.trim(), [firstName, lastName]);
+
+  // Module 1: Extraction
+  const [module1Started, setModule1Started] = useState(false);
+  const [module1StartTime, setModule1StartTime] = useState(null);
+  const [module1Elapsed, setModule1Elapsed] = useState(0);
   const [file, setFile] = useState(null);
-  const [status, setStatus] = useState('idle'); // idle | working | success | error
+  const [status, setStatus] = useState('idle');
   const [analysis, setAnalysis] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
-  const participantLabel = useMemo(() => `${firstName.trim()} ${lastName.trim()}`.trim(), [firstName, lastName]);
+
+  // Module 2: Collaboration
+  const [module2Started, setModule2Started] = useState(false);
   const [collabText, setCollabText] = useState('');
   const [collabStatus, setCollabStatus] = useState('idle');
   const [collabError, setCollabError] = useState('');
   const [collaboration, setCollaboration] = useState(null);
+
   // Module 3: Législation
+  const [module3Started, setModule3Started] = useState(false);
+  const [module3StartTime, setModule3StartTime] = useState(null);
+  const [module3Elapsed, setModule3Elapsed] = useState(0);
   const [legalQ1, setLegalQ1] = useState('');
   const [legalQ2, setLegalQ2] = useState('');
   const [legalQ3, setLegalQ3] = useState('');
-  const [legalStatus, setLegalStatus] = useState('idle'); // idle | working | success | error
+  const [legalStatus, setLegalStatus] = useState('idle');
   const [legalError, setLegalError] = useState('');
   const [legalResult, setLegalResult] = useState(null);
-  const [legalStart, setLegalStart] = useState(null);
-  const [legalElapsed, setLegalElapsed] = useState(0);
 
+  // Module 4: Canvas
+  const [module4Started, setModule4Started] = useState(false);
+  const [canvasFile, setCanvasFile] = useState(null);
+  const [canvasStatus, setCanvasStatus] = useState('idle');
+  const [canvasError, setCanvasError] = useState('');
+  const [canvasResult, setCanvasResult] = useState(null);
+
+  // Chronos
   useEffect(() => {
-    if (!startTime) {
-      return;
-    }
-
-    const intervalId = setInterval(() => {
-      setElapsedMs(Date.now() - startTime);
-    }, 1000);
-
-    return () => clearInterval(intervalId);
-  }, [startTime]);
-
-  // Chrono module 3 (10 min)
-  useEffect(() => {
-    if (!legalStart) return;
+    if (!module1StartTime) return;
     const id = setInterval(() => {
-      setLegalElapsed(Date.now() - legalStart);
+      setModule1Elapsed(Date.now() - module1StartTime);
     }, 1000);
     return () => clearInterval(id);
-  }, [legalStart]);
+  }, [module1StartTime]);
+
+  useEffect(() => {
+    if (!module3StartTime) return;
+    const id = setInterval(() => {
+      setModule3Elapsed(Date.now() - module3StartTime);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [module3StartTime]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.firstName, firstName);
@@ -99,36 +113,97 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.lastName, lastName);
   }, [lastName]);
 
-  const hasExceededTime = elapsedMs > THIRTY_MINUTES_MS;
-  const formattedElapsed = useMemo(() => formatDuration(elapsedMs), [elapsedMs]);
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.currentView, currentView);
+  }, [currentView]);
 
-  const canStartMission = phase === 'identify' && firstName.trim().length > 0 && lastName.trim().length > 0;
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.currentModule, currentModule || '');
+  }, [currentModule]);
 
-  const handleStartMission = () => {
-    if (!canStartMission) {
-      return;
-    }
-    const now = Date.now();
-    setStartTime(now);
-    setPhase('mission');
-    localStorage.setItem(STORAGE_KEYS.phase, 'mission');
-    localStorage.setItem(STORAGE_KEYS.startTime, String(now));
-    setElapsedMs(0);
+  const canStartApp = firstName.trim().length > 0 && lastName.trim().length > 0;
+
+  const handleStartApp = () => {
+    if (!canStartApp) return;
+    setCurrentView('dashboard');
   };
 
+  const openModule = (moduleId) => {
+    setCurrentModule(moduleId);
+    setCurrentView('module-detail');
+  };
+
+  const startModule = (moduleId) => {
+    setCurrentView('module-active');
+    if (moduleId === 'module1' && !module1Started) {
+      setModule1Started(true);
+      setModule1StartTime(Date.now());
+    } else if (moduleId === 'module3' && !module3Started) {
+      setModule3Started(true);
+      setModule3StartTime(Date.now());
+    } else if (moduleId === 'module2' && !module2Started) {
+      setModule2Started(true);
+    } else if (moduleId === 'module4' && !module4Started) {
+      setModule4Started(true);
+    }
+  };
+
+  const backToDashboard = () => {
+    setCurrentView('dashboard');
+    setCurrentModule(null);
+  };
+
+  // Modules config
+  const modules = [
+    {
+      id: 'module1',
+      title: 'Extraction du cahier des charges',
+      shortDesc: 'Analyse et extraction des données d\'un cahier des charges',
+      completed: !!analysis,
+      score: analysis?.score ?? null,
+      timeLimit: '30 minutes',
+    },
+    {
+      id: 'module2',
+      title: 'Collaboration humain–IA',
+      shortDesc: 'Évaluation de la qualité du dialogue avec l\'IA',
+      completed: !!collaboration,
+      score: collaboration ? Math.round((collaboration.overall ?? 0) * 20) : null,
+      timeLimit: 'Pas de limite',
+    },
+    {
+      id: 'module3',
+      title: 'Législation (recherche)',
+      shortDesc: 'Recherche et interprétation réglementaire',
+      completed: !!legalResult,
+      score: legalResult?.score ?? null,
+      timeLimit: '10 minutes',
+    },
+    {
+      id: 'module4',
+      title: 'Preuve Canvas (ChatGPT)',
+      shortDesc: 'Vérification de l\'accès à l\'outil Canvas',
+      completed: !!canvasResult,
+      score: canvasResult?.canvasDetected ? 100 : 0,
+      timeLimit: 'Pas de limite',
+    },
+  ];
+
+  const currentModuleData = modules.find(m => m.id === currentModule);
+
+  // Handlers Module 1
   const handleFileChange = (event) => {
     setFile(event.target.files?.[0] || null);
     setErrorMessage('');
-    setAnalysis(null);
   };
 
-  const handleSubmit = async (event) => {
+  const handleSubmitModule1 = async (event) => {
     event.preventDefault();
     if (!file) {
       setErrorMessage('Merci de sélectionner un fichier Excel à analyser.');
       return;
     }
-    if (!startTime) {
+    if (!module1StartTime) {
       setErrorMessage('Le chronomètre doit être lancé avant la soumission.');
       return;
     }
@@ -141,8 +216,8 @@ export default function App() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         fileName: file.name,
-        elapsedMs,
-        startedAt: startTime,
+        elapsedMs: module1Elapsed,
+        startedAt: module1StartTime,
         submittedAt: Date.now(),
         fileContent,
       };
@@ -159,16 +234,8 @@ export default function App() {
       }
 
       const result = await response.json();
-      if (result?.sheet) {
-        console.info('Résultat Google Sheet:', result.sheet);
-      }
-      if (result?.storage) {
-        console.info('Archivage du fichier:', result.storage);
-      }
       setAnalysis(result);
       setStatus('success');
-      setPhase('submitted');
-      localStorage.setItem(STORAGE_KEYS.phase, 'submitted');
     } catch (error) {
       console.error(error);
       setStatus('error');
@@ -176,310 +243,46 @@ export default function App() {
     }
   };
 
-  const handleDownloadPdf = () => {
-    if (!analysis) {
-      return;
-    }
+  // Handlers Module 2
+  const handleCollabPaste = (event) => {
+    const { clipboardData } = event;
+    if (!clipboardData) return;
 
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const marginX = 48;
-    const headerHeight = 88;
+    const html = clipboardData.getData('text/html');
+    if (!html) return;
 
-    doc.setFillColor(16, 47, 93);
-    doc.rect(0, 0, pageWidth, headerHeight, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.text('EVAL COSEP — Rapport d’évaluation', marginX, 40);
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Participant : ${participantLabel || 'Non renseigné'}`, marginX, 60);
-    doc.text(
-      `Soumission : ${
-        analysis.elapsed?.submittedAt ? new Date(analysis.elapsed.submittedAt).toLocaleString() : new Date().toLocaleString()
-      }`,
-      marginX,
-      76
-    );
+    event.preventDefault();
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      doc.querySelectorAll('script,style,button').forEach((node) => node.remove());
+      const text = doc.body.innerText
+        .replace(/\u00a0/g, ' ')
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 
-    doc.setTextColor(33, 37, 41);
-    let cursorY = headerHeight + 28;
+      if (!text) return;
 
-    const overallPct = Math.round((collaboration?.overall ?? 0) * 20);
-    const statCards = [
-      {
-        title: 'Module 1 — Extraction',
-        value: `${(analysis.score ?? 0).toFixed(1)}%`,
-        subtitle: 'Conformité au référentiel',
-        color: [0, 88, 255],
-      },
-      {
-        title: 'Module 2 — Collaboration',
-        value: `${overallPct}%`,
-        subtitle: 'Qualité humain–IA',
-        color: [23, 125, 91],
-      },
-      {
-        title: 'Module 3 — Législation',
-        value: `${(legalResult?.score ?? 0).toFixed(1)}%`,
-        subtitle: 'Recherche + interprétation',
-        color: [0, 118, 255],
-      },
-    ];
-
-    const cardWidth = 170;
-    const cardHeight = 86;
-    const cardGap = 18;
-
-    const drawStatCard = (x, y, { title, value, subtitle, color }) => {
-      // Fond très clair pour lisibilité
-      doc.setFillColor(240, 246, 255);
-      doc.setDrawColor(color[0], color[1], color[2]);
-      doc.roundedRect(x, y, cardWidth, cardHeight, 12, 12, 'FD');
-      // Titre en couleur, valeurs en sombre
-      doc.setTextColor(color[0], color[1], color[2]);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
-      doc.text(title, x + 16, y + 24);
-      doc.setTextColor(33, 37, 41);
-      doc.setFontSize(26);
-      doc.text(value, x + 16, y + 54);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.text(subtitle, x + 16, y + 72);
-      doc.setTextColor(33, 37, 41);
-    };
-
-    statCards.forEach((card, index) => {
-      const x = marginX + index * (cardWidth + cardGap);
-      drawStatCard(x, cursorY, card);
-    });
-
-    cursorY += cardHeight + 22;
-
-    // Afficher la durée de l'exercice sous les encadrés des scores
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(90, 99, 122);
-    doc.text(
-      `Durée de l’exercice: ${analysis.elapsed?.formatted ?? formattedElapsed}${hasExceededTime ? ' (hors délai)' : ''}`,
-      marginX,
-      cursorY
-    );
-    cursorY += 18;
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('Analyse extraction', marginX, cursorY);
-    cursorY += 20;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-    doc.setTextColor(90, 99, 122);
-    doc.text('Comparaison des réponses fournies avec le référentiel validé.', marginX, cursorY);
-    doc.setTextColor(33, 37, 41);
-    cursorY += 18;
-
-    const extractionRows = analysis.details?.length
-      ? analysis.details.map((detail) => [
-          detail.section,
-          detail.score !== undefined ? `${detail.score}%` : 'N/A',
-          detail.message,
-        ])
-      : [['Toutes les sections attendues', '100%', 'Aucun écart détecté']];
-
-    doc.autoTable({
-      startY: cursorY,
-      head: [['Section', 'Score', 'Commentaire']],
-      body: extractionRows,
-      theme: 'striped',
-      headStyles: { fillColor: [0, 88, 255], textColor: 255, fontStyle: 'bold' },
-      styles: {
-        fontSize: 10,
-        cellPadding: 6,
-        textColor: [33, 37, 41],
-        lineColor: [226, 232, 240],
-        lineWidth: 0.2,
-        overflow: 'linebreak',
-      },
-      alternateRowStyles: { fillColor: [246, 249, 255] },
-      columnStyles: {
-        0: { cellWidth: 200 },
-        1: { cellWidth: 70, halign: 'center' },
-        2: { cellWidth: 230, overflow: 'linebreak', valign: 'top' },
-      },
-    });
-
-    cursorY = doc.lastAutoTable.finalY + 18;
-
-    if (analysis.storage || analysis.sheet) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
-      doc.text('Traçabilité', marginX, cursorY);
-      cursorY += 16;
-      doc.setFont('helvetica', 'normal');
-      if (analysis.storage) {
-        doc.text(
-          `• Archivage du fichier : ${analysis.storage.location ?? analysis.storage.message ?? 'Information indisponible'}`,
-          marginX,
-          cursorY
-        );
-        cursorY += 14;
-      }
-      if (analysis.sheet) {
-        doc.text(
-          `• Google Sheets : ${analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')}`,
-          marginX,
-          cursorY
-        );
-        cursorY += 14;
-      }
-      cursorY += 12;
-    }
-
-    if (collaboration) {
-      if (cursorY > 660) {
-        doc.addPage();
-        cursorY = 72;
-      }
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.text('Analyse collaboration humain–IA', marginX, cursorY);
-      cursorY += 20;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      doc.setTextColor(90, 99, 122);
-      doc.text('Évaluation de la qualité du dialogue et de l’exploitation des suggestions IA.', marginX, cursorY);
-      doc.setTextColor(33, 37, 41);
-      cursorY += 18;
-
-      const collabRows = Object.values(collaboration.scores || {}).map((value) => [
-        value.label || '-',
-        `${value.score.toFixed(1)}/5 (${Math.round(value.score * 20)}%)`,
-        value.comment,
-        value.example || '',
-      ]);
-
-      if (collabRows.length) {
-        doc.autoTable({
-          startY: cursorY,
-          head: [['Critère', 'Score', 'Commentaire', 'Exemple']],
-          body: collabRows,
-          theme: 'striped',
-          headStyles: { fillColor: [29, 42, 74], textColor: 255, fontStyle: 'bold' },
-          styles: {
-            fontSize: 10,
-            cellPadding: 6,
-            textColor: [33, 37, 41],
-            lineColor: [226, 232, 240],
-            lineWidth: 0.2,
-            overflow: 'linebreak',
-          },
-          alternateRowStyles: { fillColor: [246, 248, 255] },
-          columnStyles: {
-            0: { cellWidth: 140 },
-            1: { cellWidth: 90, halign: 'center' },
-            2: { cellWidth: 170, overflow: 'linebreak', valign: 'top' },
-            3: { cellWidth: 120, overflow: 'linebreak', valign: 'top' },
-          },
-        });
-        cursorY = doc.lastAutoTable.finalY + 18;
-      }
-
-      const advice = collaboration.advice || {};
-      const listSection = (title, items) => {
-        if (!items || items.length === 0) {
-          return;
-        }
-        if (cursorY > 720) {
-          doc.addPage();
-          cursorY = 72;
-        }
-        // Boîte de section pour lisibilité
-        const boxX = marginX;
-        const boxW = pageWidth - marginX * 2;
-        doc.setFillColor(248, 251, 255);
-        doc.setDrawColor(210, 224, 255);
-        const boxStartY = cursorY;
-        // Titre
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(12);
-        doc.text(title, boxX, cursorY + 16);
-        cursorY += 32;
-        doc.setFont('helvetica', 'normal');
-        const maxWidth = boxW - 16;
-        items.forEach((item) => {
-          const lines = doc.splitTextToSize(`• ${item}`, maxWidth);
-          doc.text(lines, boxX + 8, cursorY, { maxWidth });
-          cursorY += lines.length * 12 + 4;
-          if (cursorY > 760) {
-            // Fermer la boîte et passer à la page suivante
-            doc.roundedRect(boxX, boxStartY + 6, boxW, cursorY - boxStartY, 8, 8);
-            doc.addPage();
-            cursorY = 72;
-          }
-        });
-        // Dessiner la boîte autour de la section
-        doc.roundedRect(boxX, boxStartY + 6, boxW, cursorY - boxStartY, 8, 8);
-        cursorY += 8;
-      };
-
-      listSection('Points forts', advice.strengths);
-      listSection('Axes d’amélioration', advice.improvements);
-      listSection('Conseils personnalisés', advice.tips);
-    }
-
-    // Module 3 — Législation
-    if (legalResult) {
-      if (cursorY > 660) {
-        doc.addPage();
-        cursorY = 72;
-      }
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.text('Module 3 — Législation (recherche et interprétation)', marginX, cursorY);
-      cursorY += 20;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      doc.setTextColor(90, 99, 122);
-      doc.text('Trois réponses libres évaluées sur la conformité de sens aux exigences réglementaires.', marginX, cursorY);
-      doc.setTextColor(33, 37, 41);
-      cursorY += 18;
-
-      const legalRows = (legalResult.details || []).map((d) => [
-        d.questionId,
-        `${d.score}%`,
-        d.comment
-      ]);
-
-      doc.autoTable({
-        startY: cursorY,
-        head: [['Question', 'Score', 'Commentaire']],
-        body: legalRows,
-        theme: 'striped',
-        headStyles: { fillColor: [0, 118, 255], textColor: 255, fontStyle: 'bold' },
-        styles: { fontSize: 10, cellPadding: 6, textColor: [33,37,41], lineColor: [226,232,240], lineWidth: 0.2, overflow: 'linebreak' },
-        alternateRowStyles: { fillColor: [246, 249, 255] },
-        columnStyles: {
-          0: { cellWidth: 90 },
-          1: { cellWidth: 60, halign: 'center' },
-          2: { cellWidth: 350, overflow: 'linebreak', valign: 'top' }
-        }
+      setCollabText((prev) => {
+        const prefix = prev.trim().length > 0 ? `${prev.trimEnd()}\n\n` : '';
+        return `${prefix}${text}`;
       });
-      cursorY = doc.lastAutoTable.finalY + 18;
+      setCollabError('');
+    } catch (error) {
+      console.warn('Impossible de parser le contenu HTML du presse-papiers', error);
+      const plain = clipboardData.getData('text/plain');
+      if (plain) {
+        setCollabText((prev) => {
+          const prefix = prev.trim().length > 0 ? `${prev.trimEnd()}\n\n` : '';
+          return `${prefix}${plain}`;
+        });
+      }
     }
-
-    const safeName = participantLabel.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'participant';
-    doc.save(`eval-cosep-${safeName}.pdf`);
   };
 
-  const handleCollaborationSubmit = async (event) => {
+  const handleSubmitModule2 = async (event) => {
     event.preventDefault();
-    if (!analysis) {
-      setCollabError("Merci de terminer l'analyse de l'extraction avant de passer à l'étape 2.");
-      return;
-    }
     if (!collabText.trim()) {
       setCollabError("Veuillez coller la conversation complète avec l'IA avant de lancer l'analyse.");
       return;
@@ -493,7 +296,7 @@ export default function App() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         transcript: collabText.trim(),
-        extractionScore: analysis.score ?? 0,
+        extractionScore: analysis?.score ?? 0,
         submittedAt: Date.now(),
       };
 
@@ -519,402 +322,639 @@ export default function App() {
     }
   };
 
-  const handleCollabPaste = (event) => {
-    const { clipboardData } = event;
-    if (!clipboardData) {
-      return;
-    }
-
-    const html = clipboardData.getData('text/html');
-    if (!html) {
-      return;
-    }
-
-    event.preventDefault();
+  // Handlers Module 3
+  const handleSubmitModule3 = async () => {
+    setLegalStatus('working');
+    setLegalError('');
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      doc.querySelectorAll('script,style,button').forEach((node) => node.remove());
-      const text = doc.body.innerText
-        .replace(/\u00a0/g, ' ')
-        .replace(/\r\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-
-      if (!text) {
-        return;
-      }
-
-      setCollabText((prev) => {
-        const prefix = prev.trim().length > 0 ? `${prev.trimEnd()}\n\n` : '';
-        return `${prefix}${text}`;
+      const payload = {
+        answers: { Q1: legalQ1, Q2: legalQ2, Q3: legalQ3 },
+        startedAt: module3StartTime,
+        submittedAt: Date.now(),
+        elapsedMs: module3StartTime ? Date.now() - module3StartTime : 0,
+      };
+      const res = await fetch('/.netlify/functions/evaluate-legal-training', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
-      setCollabError('');
-    } catch (error) {
-      console.warn('Impossible de parser le contenu HTML du presse-papiers', error);
-      const plain = clipboardData.getData('text/plain');
-      if (plain) {
-        setCollabText((prev) => {
-          const prefix = prev.trim().length > 0 ? `${prev.trimEnd()}\n\n` : '';
-          return `${prefix}${plain}`;
-        });
-      }
+      if (!res.ok) throw new Error(await res.text());
+      const json = await res.json();
+      setLegalResult(json);
+      setLegalStatus('success');
+    } catch (err) {
+      setLegalError(err.message || "Erreur pendant l'évaluation.");
+      setLegalStatus('error');
     }
   };
 
-  const handleDownloadReport = () => {
-    if (!analysis) {
+  // Handlers Module 4
+  const handleCanvasFileChange = (event) => {
+    setCanvasFile(event.target.files?.[0] || null);
+    setCanvasError('');
+  };
+
+  const handleSubmitModule4 = async (event) => {
+    event.preventDefault();
+    if (!canvasFile) {
+      setCanvasError("Merci de sélectionner une capture d'écran.");
       return;
     }
-    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const safeName = participantLabel.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'participant';
-    const filename = `rapport-eval-cosep-${safeName}.txt`;
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      setCanvasStatus('working');
+      setCanvasError('');
+      const fileContent = await toBase64(canvasFile);
+      const payload = {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        imageContent: fileContent,
+        mimeType: canvasFile.type || 'image/png',
+      };
+      const res = await fetch('/.netlify/functions/detect-canvas-icon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const json = await res.json();
+      setCanvasResult(json);
+      setCanvasStatus('success');
+    } catch (err) {
+      setCanvasStatus('error');
+      setCanvasError(err.message || 'Analyse impossible pour le moment.');
+    }
   };
 
-  const modulesDone = (analysis ? 1 : 0) + (legalResult ? 1 : 0) + (collaboration ? 1 : 0);
-  const progressPct = Math.round((modulesDone / 3) * 100);
+  // PDF Generation
+  const handleDownloadPdf = () => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const marginX = 48;
+    const headerHeight = 88;
 
-  return (
-    <div className="layout">
-      <div className="progress-rail">
-        <div className="progress-fill" style={{ height: `${progressPct}vh` }} />
-      </div>
-      <main className="page">
-      <div className="card">
-        <h1>EVAL COSEP — Extraction du cahier des charges</h1>
-        <p>
-          Cette interface simule le travail d’un coordinateur COSEP : analysez les documents fournis, extrayez
-          toutes les informations nécessaires et déposez votre synthèse sous forme de fichier Excel. Le score est
-          calculé automatiquement en comparaison avec la référence validée.
-        </p>
-      </div>
+    doc.setFillColor(16, 47, 93);
+    doc.rect(0, 0, pageWidth, headerHeight, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.text('EVAL COSEP — Rapport d\'évaluation', marginX, 40);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Participant : ${participantLabel || 'Non renseigné'}`, marginX, 60);
+    doc.text(`Date : ${new Date().toLocaleString()}`, marginX, 76);
 
-      {phase === 'identify' && (
-        <div className="card">
-          <h2 id="task-1">Identifiez-vous pour démarrer</h2>
-          <p className="status">Le chronomètre commencera dès que vous accéderez aux documents.</p>
-          <div className="form-row">
-            <label>
-              Prénom
-              <input type="text" value={firstName} onChange={(event) => setFirstName(event.target.value)} />
-            </label>
-            <label>
-              Nom
-              <input type="text" value={lastName} onChange={(event) => setLastName(event.target.value)} />
-            </label>
-          </div>
-          <button className="primary" type="button" onClick={handleStartMission} disabled={!canStartMission}>
-            Accéder aux documents et démarrer le chrono
-          </button>
-        </div>
-      )}
+    doc.setTextColor(33, 37, 41);
+    let cursorY = headerHeight + 28;
 
-      {phase !== 'identify' && (
-        <div className="card">
-          <h2 id="task-2">Mission et documents</h2>
-          <p>
-            Vous disposez de 30 minutes à partir du téléchargement des documents. Ce délai peut être dépassé, mais
-            il sera enregistré dans l’analyse finale.
-          </p>
-          <div className="timer">
-            Temps écoulé : {formattedElapsed} {hasExceededTime ? '(hors délai)' : ''}
-          </div>
-          <div className="pad-top">
-            <p>Documents disponibles :</p>
-            <div className="links">
-              {DOCUMENT_LINKS.map((doc) => (
-                <div key={doc.label} className="link-item">
-                  <a href={doc.href} target="_blank" rel="noreferrer">
-                    {doc.label}
-                  </a>
-                  {doc.description && <span className="link-description">{doc.description}</span>}
-                </div>
-              ))}
+    // Résumé de tous les modules
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Résumé des modules', marginX, cursorY);
+    cursorY += 20;
+
+    const summaryRows = modules.map(m => [
+      m.title,
+      m.completed ? `${(m.score ?? 0).toFixed(1)}%` : 'Non réalisé',
+      m.completed ? '✓' : '—'
+    ]);
+
+    doc.autoTable({
+      startY: cursorY,
+      head: [['Module', 'Score', 'Statut']],
+      body: summaryRows,
+      theme: 'striped',
+      headStyles: { fillColor: [16, 47, 93], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 11, cellPadding: 8, textColor: [33, 37, 41] },
+      alternateRowStyles: { fillColor: [246, 249, 255] },
+      columnStyles: {
+        0: { cellWidth: 300 },
+        1: { cellWidth: 100, halign: 'center' },
+        2: { cellWidth: 100, halign: 'center' }
+      }
+    });
+
+    cursorY = doc.lastAutoTable.finalY + 24;
+
+    // Module 1
+    if (analysis) {
+      if (cursorY > 660) { doc.addPage(); cursorY = 72; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('Module 1 — Extraction du cahier des charges', marginX, cursorY);
+      cursorY += 20;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.text(`Score: ${(analysis.score ?? 0).toFixed(1)}%`, marginX, cursorY);
+      cursorY += 14;
+      doc.text(`Temps: ${analysis.elapsed?.formatted ?? formatDuration(module1Elapsed)}`, marginX, cursorY);
+      cursorY += 18;
+
+      const extractionRows = analysis.details?.length
+        ? analysis.details.map((detail) => [detail.section, detail.score !== undefined ? `${detail.score}%` : 'N/A', detail.message])
+        : [['Toutes les sections attendues', '100%', 'Aucun écart détecté']];
+
+      doc.autoTable({
+        startY: cursorY,
+        head: [['Section', 'Score', 'Commentaire']],
+        body: extractionRows,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 88, 255], textColor: 255, fontStyle: 'bold' },
+        styles: { fontSize: 10, cellPadding: 6, textColor: [33, 37, 41], overflow: 'linebreak' },
+        alternateRowStyles: { fillColor: [246, 249, 255] },
+        columnStyles: {
+          0: { cellWidth: 200 },
+          1: { cellWidth: 70, halign: 'center' },
+          2: { cellWidth: 230, overflow: 'linebreak' }
+        }
+      });
+      cursorY = doc.lastAutoTable.finalY + 18;
+    }
+
+    // Module 2
+    if (collaboration) {
+      if (cursorY > 660) { doc.addPage(); cursorY = 72; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('Module 2 — Collaboration humain–IA', marginX, cursorY);
+      cursorY += 20;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.text(`Score global: ${collaboration.overall?.toFixed(1) ?? '0.0'}/5 (${Math.round((collaboration.overall ?? 0) * 20)}%)`, marginX, cursorY);
+      cursorY += 18;
+
+      const collabRows = Object.values(collaboration.scores || {}).map((value) => [
+        value.label || '-',
+        `${value.score.toFixed(1)}/5`,
+        value.comment
+      ]);
+
+      if (collabRows.length) {
+        doc.autoTable({
+          startY: cursorY,
+          head: [['Critère', 'Score', 'Commentaire']],
+          body: collabRows,
+          theme: 'striped',
+          headStyles: { fillColor: [29, 42, 74], textColor: 255, fontStyle: 'bold' },
+          styles: { fontSize: 10, cellPadding: 6, textColor: [33, 37, 41], overflow: 'linebreak' },
+          alternateRowStyles: { fillColor: [246, 248, 255] },
+          columnStyles: {
+            0: { cellWidth: 140 },
+            1: { cellWidth: 90, halign: 'center' },
+            2: { cellWidth: 270, overflow: 'linebreak' }
+          }
+        });
+        cursorY = doc.lastAutoTable.finalY + 18;
+      }
+    }
+
+    // Module 3
+    if (legalResult) {
+      if (cursorY > 660) { doc.addPage(); cursorY = 72; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('Module 3 — Législation', marginX, cursorY);
+      cursorY += 20;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.text(`Score: ${(legalResult.score ?? 0).toFixed(1)}%`, marginX, cursorY);
+      cursorY += 18;
+
+      const legalRows = (legalResult.details || []).map((d) => [d.questionId, `${d.score}%`, d.comment]);
+
+      doc.autoTable({
+        startY: cursorY,
+        head: [['Question', 'Score', 'Commentaire']],
+        body: legalRows,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 118, 255], textColor: 255, fontStyle: 'bold' },
+        styles: { fontSize: 10, cellPadding: 6, textColor: [33, 37, 41], overflow: 'linebreak' },
+        alternateRowStyles: { fillColor: [246, 249, 255] },
+        columnStyles: {
+          0: { cellWidth: 90 },
+          1: { cellWidth: 60, halign: 'center' },
+          2: { cellWidth: 350, overflow: 'linebreak' }
+        }
+      });
+      cursorY = doc.lastAutoTable.finalY + 18;
+    }
+
+    // Module 4
+    if (canvasResult) {
+      if (cursorY > 720) { doc.addPage(); cursorY = 72; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('Module 4 — Preuve Canvas', marginX, cursorY);
+      cursorY += 20;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      const presence = canvasResult.canvasDetected ? 'Présente ✓' : 'Absente ✗';
+      const conf = typeof canvasResult.confidence === 'number' ? Math.round(canvasResult.confidence * 100) : 0;
+      doc.text(`Détection icône Canvas: ${presence} (confiance ${conf}%)`, marginX, cursorY);
+      cursorY += 14;
+      if (canvasResult.evidence) {
+        const ev = doc.splitTextToSize(`Indice: ${canvasResult.evidence}`, pageWidth - marginX * 2);
+        doc.text(ev, marginX, cursorY);
+      }
+    }
+
+    const safeName = participantLabel.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'participant';
+    doc.save(`eval-cosep-${safeName}.pdf`);
+  };
+
+  // === RENDER ===
+
+  // Écran d'identification
+  if (currentView === 'identify') {
+    return (
+      <div className="layout">
+        <main className="page">
+          <div className="card">
+            <h1>EVAL COSEP</h1>
+            <p>Bienvenue dans l'évaluation COSEP. Identifiez-vous pour accéder aux modules.</p>
+            <div className="form-row">
+              <label>
+                Prénom
+                <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+              </label>
+              <label>
+                Nom
+                <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              </label>
             </div>
-          </div>
-          <p className="status pad-top">
-            Préparez votre analyse dans votre propre tableur Excel. La restitution doit être exhaustive et vérifiable.
-          </p>
-          <p className="status note-lock">
-            Cette session est verrouillée après démarrage. Veillez à finaliser votre extraction avant de déposer votre fichier.
-          </p>
-        </div>
-      )}
-
-      {phase !== 'identify' && (
-        <div className="card">
-          <h2 id="task-3">Déposez votre fichier Excel d’analyse</h2>
-          <form onSubmit={handleSubmit}>
-            <div className="upload-zone">
-              <p>Glissez votre fichier Excel ici ou utilisez le sélecteur ci-dessous.</p>
-              <input type="file" accept=".xls,.xlsx" onChange={handleFileChange} />
-            </div>
-            <p className="status">
-              Formats acceptés : .xlsx et .xls. Le fichier est conservé à des fins d’audit et de traçabilité.
-            </p>
-            <button className="primary pad-top" type="submit" disabled={status === 'working'}>
-              {status === 'working' ? 'Analyse en cours…' : 'Lancer l’analyse'}
+            <button className="primary" type="button" onClick={handleStartApp} disabled={!canStartApp}>
+              Accéder aux modules
             </button>
-          </form>
-          {errorMessage && <div className="error">{errorMessage}</div>}
-        </div>
-      )}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
-      {analysis && (
-        <div className="card">
-          <h2 id="task-4">Module 1 — Résultat de l’extraction</h2>
-          <div className="results">
-            <div className="results-header">
-              <div>
-                <p className="participant">{participantLabel || 'Participant'}</p>
-                <p className="timestamp">
-                  Soumis le{' '}
-                  {analysis.elapsed?.submittedAt
-                    ? new Date(analysis.elapsed.submittedAt).toLocaleString()
-                    : new Date().toLocaleString()}
-                </p>
-              </div>
+  // Dashboard principal
+  if (currentView === 'dashboard') {
+    const hasAnyResult = analysis || collaboration || legalResult || canvasResult;
+
+    return (
+      <div className="layout">
+        <main className="page">
+          <div className="card">
+            <h1>EVAL COSEP — Modules</h1>
+            <p className="participant-name">Participant: {participantLabel}</p>
+            {hasAnyResult && (
+              <button type="button" className="primary download-main" onClick={handleDownloadPdf}>
+                Télécharger le rapport d'évaluation (PDF)
+              </button>
+            )}
+          </div>
+
+          <div className="modules-grid">
+            {modules.map((module) => (
               <div
-                className={`score-badge ${
-                  analysis.score >= 80 ? 'score-good' : analysis.score >= 50 ? 'score-medium' : 'score-low'
-                }`}
+                key={module.id}
+                className={`module-card ${module.completed ? 'completed' : ''}`}
+                onClick={() => !module.completed && openModule(module.id)}
+                style={{
+                  cursor: module.completed ? 'not-allowed' : 'pointer',
+                  opacity: module.completed ? 0.7 : 1
+                }}
               >
-                {analysis.score?.toFixed(1) ?? '0.0'}%
-              </div>
-            </div>
-            <p className="elapsed">
-              Temps enregistré : {analysis.elapsed?.formatted ?? formattedElapsed}{' '}
-              {analysis.elapsed?.ms > THIRTY_MINUTES_MS ? '(hors délai)' : ''}
-            </p>
-            {analysis.details?.length ? (
-              <div className="details-table">
-                <div className="details-header">
-                  <span>Section</span>
-                  <span>Score</span>
-                  <span>Commentaire</span>
+                <div className="module-header">
+                  <h3>{module.title}</h3>
+                  {module.completed && (
+                    <div
+                      className="module-score-badge"
+                      style={{ backgroundColor: getScoreColor(module.score) }}
+                    >
+                      {module.score.toFixed(1)}%
+                    </div>
+                  )}
                 </div>
-                {analysis.details.map((detail) => (
-                  <div key={`${detail.section}-${detail.message}`} className="details-row">
-                    <span className="details-section">{detail.section}</span>
-                    <span className="details-score">{detail.score ?? 'N/A'}%</span>
-                    <span className="details-comment">{detail.message}</span>
-                  </div>
-                ))}
+                <p className="module-short-desc">{module.shortDesc}</p>
+                {module.completed && <div className="module-completed-label">✓ Terminé</div>}
               </div>
-            ) : (
-              <p>Toutes les sections attendues ont été retrouvées.</p>
-            )}
-            {analysis.storage && (
-              <p className="status">
-                Copie du fichier : {analysis.storage.location ?? analysis.storage.message ?? 'enregistrée.'}
-              </p>
-            )}
-            {analysis.sheet && (
-              <p className="status">
-                Archivage Google Sheets : {analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')}
-              </p>
-            )}
+            ))}
           </div>
-          <button type="button" className="primary download" onClick={handleDownloadPdf}>
-            Télécharger l’évaluation (PDF)
-          </button>
-        </div>
-      )}
+        </main>
+      </div>
+    );
+  }
 
-      {analysis && (
-        <div className="card">
-          <h2 id="task-5">Module 2 — Collaboration humain–IA</h2>
-          <p>
-            Collez ci-dessous l’intégralité de votre échange avec l’IA (ChatGPT, Gemini, etc.). Le système analyse la qualité de
-            la collaboration et vous fournit un diagnostic critique.
-          </p>
-          <form onSubmit={handleCollaborationSubmit}>
-            <textarea
-              value={collabText}
-              onChange={(event) => setCollabText(event.target.value)}
-              onPaste={handleCollabPaste}
-              placeholder="Collez ici votre conversation complète, dans l’ordre chronologique."
-              rows={14}
-            />
-            <p className="status">
-              Les informations sont traitées localement pour cette évaluation et ne sont pas partagées publiquement.
-            </p>
-            <button className="primary" type="submit" disabled={collabStatus === 'working'}>
-              {collabStatus === 'working' ? 'Analyse de la collaboration…' : 'Analyser la collaboration'}
-            </button>
-          </form>
-          {collabError && <div className="error">{collabError}</div>}
+  // Détail du module (avant démarrage)
+  if (currentView === 'module-detail' && currentModuleData) {
+    return (
+      <div className="layout">
+        <main className="page">
+          <div className="card">
+            <button className="back-button" onClick={backToDashboard}>← Retour au menu</button>
+            <h1>{currentModuleData.title}</h1>
 
-          {collaboration && (
-            <div className="collab-results">
-              <div className="collab-overview">
-                <span className="collab-overall">
-                  Score global collaboration : {collaboration.overall?.toFixed(1) ?? '0.0'}/5 ({Math.round((collaboration.overall ?? 0) * 20)}%)
-                </span>
-                {collaboration.storage && (
-                  <span className="collab-status">
-                    Archivage conversation : {collaboration.storage.location ?? collaboration.storage.message ?? 'n/a'}
-                  </span>
-                )}
-                {collaboration.sheet && (
-                  <span className="collab-status">
-                    Google Sheets : {collaboration.sheet.message ?? (collaboration.sheet.success ? 'Enregistré.' : 'Non enregistré.')}
-                  </span>
-                )}
-              </div>
-              <div className="collab-table">
-                <div className="collab-header">
-                  <span>Critère</span>
-                  <span>Score</span>
-                  <span>Commentaire</span>
+            {currentModule === 'module1' && (
+              <>
+                <p>
+                  Analysez les documents fournis et extrayez toutes les informations nécessaires.
+                  Déposez ensuite votre synthèse sous forme de fichier Excel.
+                </p>
+                <p><strong>Durée:</strong> {currentModuleData.timeLimit}</p>
+                <p>Le chronomètre démarre dès que vous cliquez sur "Démarrer le module".</p>
+                <div className="pad-top">
+                  <p>Documents disponibles :</p>
+                  <div className="links">
+                    {DOCUMENT_LINKS.map((doc) => (
+                      <div key={doc.label} className="link-item">
+                        <a href={doc.href} target="_blank" rel="noreferrer">
+                          {doc.label}
+                        </a>
+                        <span className="link-description">{doc.description}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                {Object.entries(collaboration.scores || {}).map(([key, value]) => (
-                  <div key={key} className="collab-row">
-                    <span className="collab-criterion">{value.label || key}</span>
-                    <span className="collab-score">{value.score.toFixed(1)}/5 ({Math.round(value.score * 20)}%)</span>
-                    <span className="collab-comment">
-                      {value.comment}
-                      {value.example && <span className="collab-example">{value.example}</span>}
-                    </span>
-                  </div>
-                ))}
+              </>
+            )}
+
+            {currentModule === 'module2' && (
+              <>
+                <p>
+                  Collez l'intégralité de votre échange avec une IA (ChatGPT, Gemini, etc.).
+                  Le système analyse la qualité de votre collaboration.
+                </p>
+                <p><strong>Durée:</strong> {currentModuleData.timeLimit}</p>
+              </>
+            )}
+
+            {currentModule === 'module3' && (
+              <>
+                <p>
+                  Recherchez et interprétez la réglementation relative à la formation de base en sécurité
+                  sur les chantiers (AR 7 avril 2023, CP 124, CCT, Constructiv/VCA).
+                </p>
+                <p><strong>Durée:</strong> {currentModuleData.timeLimit}</p>
+                <p>Le chronomètre démarre dès que vous cliquez sur "Démarrer le module".</p>
+              </>
+            )}
+
+            {currentModule === 'module4' && (
+              <>
+                <p>
+                  Chargez une capture d'écran montrant la zone de saisie de ChatGPT.
+                  L'outil détecte si l'icône <em>Canvas</em> est présente.
+                </p>
+                <p><strong>Durée:</strong> {currentModuleData.timeLimit}</p>
+              </>
+            )}
+
+            <button className="primary" onClick={() => startModule(currentModule)}>
+              Démarrer le module
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Module actif
+  if (currentView === 'module-active' && currentModuleData) {
+    return (
+      <div className="layout">
+        <main className="page">
+
+          {/* MODULE 1 */}
+          {currentModule === 'module1' && (
+            <>
+              <div className="card">
+                <h2>Module 1 — Extraction du cahier des charges</h2>
+                <div className="timer">
+                  Temps écoulé: {formatDuration(module1Elapsed)} {module1Elapsed > THIRTY_MINUTES_MS ? '(hors délai)' : ''}
+                </div>
+                <p>Préparez votre analyse dans Excel et déposez votre fichier ci-dessous.</p>
               </div>
 
-              <div className="collab-advice">
-                {collaboration.advice?.strengths?.length ? (
-                  <div>
-                    <h3>Points forts</h3>
-                    <ul>
-                      {collaboration.advice.strengths.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
+              <div className="card">
+                <h3>Déposez votre fichier Excel</h3>
+                <form onSubmit={handleSubmitModule1}>
+                  <div className="upload-zone">
+                    <p>Glissez votre fichier Excel ici ou utilisez le sélecteur.</p>
+                    <input type="file" accept=".xls,.xlsx" onChange={handleFileChange} />
                   </div>
-                ) : null}
-
-                {collaboration.advice?.improvements?.length ? (
-                  <div>
-                    <h3>Axes d’amélioration</h3>
-                    <ul>
-                      {collaboration.advice.improvements.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {collaboration.advice?.tips?.length ? (
-                  <div>
-                    <h3>Conseils personnalisés</h3>
-                    <ul>
-                      {collaboration.advice.tips.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
+                  <button className="primary pad-top" type="submit" disabled={status === 'working'}>
+                    {status === 'working' ? 'Analyse en cours…' : 'Lancer l\'analyse'}
+                  </button>
+                </form>
+                {errorMessage && <div className="error">{errorMessage}</div>}
               </div>
-            </div>
+
+              {analysis && (
+                <div className="card">
+                  <h3>Résultat</h3>
+                  <div className="results">
+                    <div className="results-header">
+                      <div>
+                        <p className="participant">{participantLabel}</p>
+                        <p className="timestamp">Soumis le {new Date().toLocaleString()}</p>
+                      </div>
+                      <div
+                        className="score-badge"
+                        style={{ backgroundColor: getScoreColor(analysis.score) }}
+                      >
+                        {analysis.score?.toFixed(1) ?? '0.0'}%
+                      </div>
+                    </div>
+                    {analysis.details?.length ? (
+                      <div className="details-table">
+                        <div className="details-header">
+                          <span>Section</span>
+                          <span>Score</span>
+                          <span>Commentaire</span>
+                        </div>
+                        {analysis.details.map((detail) => (
+                          <div key={`${detail.section}-${detail.message}`} className="details-row">
+                            <span className="details-section">{detail.section}</span>
+                            <span className="details-score">{detail.score ?? 'N/A'}%</span>
+                            <span className="details-comment">{detail.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>Toutes les sections attendues ont été retrouvées.</p>
+                    )}
+                  </div>
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
+                  </button>
+                </div>
+              )}
+            </>
           )}
-          <button type="button" className="primary download" onClick={handleDownloadPdf}>Télécharger l’évaluation (PDF)</button>
-        </div>
-      )}
 
-      {/* Module 3 — Législation */}
-      {phase !== 'identify' && (
-        <div className="card">
-          <h2 id="task-6">Module 3 — Législation: formation sécurité (10 min)</h2>
-          <div className="info-box">
-            <h4>Contexte et consignes</h4>
-            <p className="muted">
-              Vous devez rechercher et interpréter correctement la réglementation relative à la formation de base en sécurité sur les
-              chantiers temporaires ou mobiles (Arrêté royal du 7 avril 2023, secteur construction CP 124, CCT et attestations Constructiv/VCA).
-              Utilisez une IA et le web si nécessaire. Vous avez 10 minutes pour répondre aux 3 questions ci‑dessous.
-              L’évaluation porte sur l’exactitude du sens, pas sur les mots exacts.
-            </p>
-          </div>
-          <div className="timer">Temps écoulé: {formatDuration(legalElapsed)} {legalStart ? '' : '(cliquez sur Démarrer)'} </div>
-          <div className="pad-top">
-            <button className="secondary" type="button" onClick={() => { setLegalStart(Date.now()); setLegalElapsed(0); }} disabled={!!legalStart}>
-              Démarrer le module (10:00)
-            </button>
-          </div>
-          <div className="pad-top">
-            <label>
-              Q1 — Objectif et champ d'application (AR 7 avril 2023)
-              <span className="muted"> — But de la formation, risques couverts (propres et d’autres entrepreneurs), démontrabilité par l’entrepreneur.</span>
-              <textarea rows={5} value={legalQ1} onChange={(e) => setLegalQ1(e.target.value)} placeholder="Votre réponse libre" />
-            </label>
-          </div>
-          <div className="pad-top">
-            <label>
-              Q2 — Contenu et durée minimales (CP 124)
-              <span className="muted"> — Durée minimale 8h; citez deux objectifs parmi acteurs, collaboration, principes généraux de prévention, mesures de prévention, comportement sûr.</span>
-              <textarea rows={5} value={legalQ2} onChange={(e) => setLegalQ2(e.target.value)} placeholder="Votre réponse libre" />
-            </label>
-          </div>
-          <div className="pad-top">
-            <label>
-              Q3 — Équivalences et dispenses (CCT + AR)
-              <span className="muted"> — Citez au moins deux conditions valides (ex: VCA, 5 ans d’expérience selon AR/CCT, autre formation équivalente, attestation Constructiv, formation sécurité Constructiv).</span>
-              <textarea rows={5} value={legalQ3} onChange={(e) => setLegalQ3(e.target.value)} placeholder="Votre réponse libre" />
-            </label>
-          </div>
-          <div className="pad-top">
-            <button className="primary" type="button" disabled={legalStatus==='working'} onClick={async () => {
-              setLegalStatus('working'); setLegalError('');
-              try {
-                const payload = {
-                  answers: { Q1: legalQ1, Q2: legalQ2, Q3: legalQ3 },
-                  startedAt: legalStart,
-                  submittedAt: Date.now(),
-                  elapsedMs: legalStart ? Date.now() - legalStart : 0
-                };
-                const res = await fetch('/.netlify/functions/evaluate-legal-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!res.ok) throw new Error(await res.text());
-                const json = await res.json();
-                setLegalResult(json);
-                setLegalStatus('success');
-              } catch (err) {
-                setLegalError(err.message || 'Erreur pendant l\'évaluation.');
-                setLegalStatus('error');
-              }
-            }}>
-              {legalStatus==='working' ? 'Évaluation en cours…' : 'Soumettre le module'}
-            </button>
-          </div>
-          {legalError && <div className="error">{legalError}</div>}
-
-          {legalResult && (
-            <div className="results pad-top">
-              <div className="results-header">
-                <div>
-                  <p className="participant">Score module 3</p>
-                  <p className="timestamp">{(legalResult.score ?? 0).toFixed(1)}%</p>
-                </div>
+          {/* MODULE 2 */}
+          {currentModule === 'module2' && (
+            <>
+              <div className="card">
+                <h2>Module 2 — Collaboration humain–IA</h2>
+                <p>Collez ci-dessous l'intégralité de votre échange avec l'IA.</p>
+                <form onSubmit={handleSubmitModule2}>
+                  <textarea
+                    value={collabText}
+                    onChange={(e) => setCollabText(e.target.value)}
+                    onPaste={handleCollabPaste}
+                    placeholder="Collez ici votre conversation complète."
+                    rows={14}
+                  />
+                  <button className="primary" type="submit" disabled={collabStatus === 'working'}>
+                    {collabStatus === 'working' ? 'Analyse en cours…' : 'Analyser la collaboration'}
+                  </button>
+                </form>
+                {collabError && <div className="error">{collabError}</div>}
               </div>
-              <div className="details-table">
-                <div className="details-header"><span>Question</span><span>Score</span><span>Commentaire</span></div>
-                {legalResult.details?.map((d) => (
-                  <div key={d.questionId} className="details-row">
-                    <span className="details-section">{d.questionId}</span>
-                    <span className="details-score">{d.score}%</span>
-                    <span className="details-comment">{d.comment}</span>
+
+              {collaboration && (
+                <div className="card">
+                  <h3>Résultat</h3>
+                  <div className="collab-results">
+                    <div className="collab-overview">
+                      <span className="collab-overall">
+                        Score global: {collaboration.overall?.toFixed(1) ?? '0.0'}/5 ({Math.round((collaboration.overall ?? 0) * 20)}%)
+                      </span>
+                    </div>
+                    <div className="collab-table">
+                      <div className="collab-header">
+                        <span>Critère</span>
+                        <span>Score</span>
+                        <span>Commentaire</span>
+                      </div>
+                      {Object.entries(collaboration.scores || {}).map(([key, value]) => (
+                        <div key={key} className="collab-row">
+                          <span className="collab-criterion">{value.label || key}</span>
+                          <span className="collab-score">{value.score.toFixed(1)}/5</span>
+                          <span className="collab-comment">{value.comment}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
-              <button type="button" className="primary download" onClick={handleDownloadPdf}>Télécharger l’évaluation (PDF)</button>
-            </div>
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
+                  </button>
+                </div>
+              )}
+            </>
           )}
-        </div>
-      )}
-      </main>
-    </div>
-  );
+
+          {/* MODULE 3 */}
+          {currentModule === 'module3' && (
+            <>
+              <div className="card">
+                <h2>Module 3 — Législation</h2>
+                <div className="timer">
+                  Temps écoulé: {formatDuration(module3Elapsed)} {module3Elapsed > TEN_MINUTES_MS ? '(hors délai)' : ''}
+                </div>
+                <p>Répondez aux 3 questions ci-dessous concernant la réglementation.</p>
+
+                <div className="pad-top">
+                  <label>
+                    Q1 — Objectif et champ d'application (AR 7 avril 2023)
+                    <textarea rows={5} value={legalQ1} onChange={(e) => setLegalQ1(e.target.value)} placeholder="Votre réponse" />
+                  </label>
+                </div>
+                <div className="pad-top">
+                  <label>
+                    Q2 — Contenu et durée minimales (CP 124)
+                    <textarea rows={5} value={legalQ2} onChange={(e) => setLegalQ2(e.target.value)} placeholder="Votre réponse" />
+                  </label>
+                </div>
+                <div className="pad-top">
+                  <label>
+                    Q3 — Équivalences et dispenses (CCT + AR)
+                    <textarea rows={5} value={legalQ3} onChange={(e) => setLegalQ3(e.target.value)} placeholder="Votre réponse" />
+                  </label>
+                </div>
+
+                <button className="primary pad-top" type="button" disabled={legalStatus === 'working'} onClick={handleSubmitModule3}>
+                  {legalStatus === 'working' ? 'Évaluation en cours…' : 'Soumettre'}
+                </button>
+                {legalError && <div className="error">{legalError}</div>}
+              </div>
+
+              {legalResult && (
+                <div className="card">
+                  <h3>Résultat</h3>
+                  <div className="results">
+                    <div className="results-header">
+                      <div>
+                        <p className="participant">Score module 3</p>
+                      </div>
+                      <div
+                        className="score-badge"
+                        style={{ backgroundColor: getScoreColor(legalResult.score) }}
+                      >
+                        {(legalResult.score ?? 0).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="details-table">
+                      <div className="details-header"><span>Question</span><span>Score</span><span>Commentaire</span></div>
+                      {legalResult.details?.map((d) => (
+                        <div key={d.questionId} className="details-row">
+                          <span className="details-section">{d.questionId}</span>
+                          <span className="details-score">{d.score}%</span>
+                          <span className="details-comment">{d.comment}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* MODULE 4 */}
+          {currentModule === 'module4' && (
+            <>
+              <div className="card">
+                <h2>Module 4 — Preuve Canvas (ChatGPT)</h2>
+                <p>Chargez une capture d'écran montrant la zone de saisie de ChatGPT avec l'icône Canvas.</p>
+                <form onSubmit={handleSubmitModule4}>
+                  <div className="upload-zone">
+                    <p>Glissez votre capture ici ou utilisez le sélecteur.</p>
+                    <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleCanvasFileChange} />
+                  </div>
+                  <button className="primary pad-top" type="submit" disabled={canvasStatus === 'working'}>
+                    {canvasStatus === 'working' ? 'Analyse en cours…' : 'Vérifier'}
+                  </button>
+                </form>
+                {canvasError && <div className="error">{canvasError}</div>}
+              </div>
+
+              {canvasResult && (
+                <div className="card">
+                  <h3>Résultat</h3>
+                  <div className="results">
+                    <div className="results-header">
+                      <div>
+                        <p className="participant">Détection Canvas</p>
+                        <p className="timestamp">
+                          {canvasResult.canvasDetected ? 'Icône détectée ✅' : 'Icône non détectée ❌'}
+                          {typeof canvasResult.confidence === 'number' && (
+                            <span> — confiance {Math.round(canvasResult.confidence * 100)}%</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    {canvasResult.evidence && <p className="status">{canvasResult.evidence}</p>}
+                  </div>
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+        </main>
+      </div>
+    );
+  }
+
+  return null;
 }
