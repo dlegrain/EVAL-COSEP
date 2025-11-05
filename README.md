@@ -1,11 +1,37 @@
-# EVAL COSEP – prototype d’évaluation automatisée
+# EVAL COSEP – prototype d'évaluation automatisée
 
-Plateforme d’évaluation destinée à mesurer la capacité d’un utilisateur à extraire et structurer les informations d’un cahier des charges. Elle comprend :
+Plateforme d'évaluation modulaire destinée à mesurer les compétences d'un coordinateur COSEP. Elle comprend **4 modules indépendants** accessibles via un dashboard interactif.
 
-- un front React/Vite servant l’interface d’évaluation (identification, accès aux documents, chrono 30 min, dépôt d’un Excel libre) ;
-- une fonction Netlify pour l’analyse de l’Excel fourni (`netlify/functions/analyze-upload.js`) : comparaison vs référence, scoring, rapport PDF, archivage Blobs/Google Sheets ;
-- une seconde fonction Netlify dédiée à la collaboration humain–IA (`netlify/functions/analyze-collaboration.js`) qui évalue la qualité du dialogue avec l’IA (scores 0–5, conseils personnalisés, archivage).
-- une troisième fonction Netlify pour la preuve d’accès à Canvas sur ChatGPT (`netlify/functions/detect-canvas-icon.js`) qui analyse une capture d’écran via Gemini et valide la présence de l’icône « Canvas ».
+## 🎯 Modules d'évaluation
+
+1. **Module 1 — Extraction du cahier des charges** (30 min)
+   Analyser des documents PDF et extraire les informations dans un fichier Excel structuré.
+
+2. **Module 2 — Collaboration humain–IA** (sans limite)
+   Évaluation de la qualité du dialogue avec une IA (ChatGPT, Gemini, etc.) : pertinence des prompts, exploitation des réponses, itérations constructives.
+
+3. **Module 3 — Législation (recherche)** (10 min)
+   Recherche et interprétation de la réglementation sur la formation sécurité en construction (AR 7 avril 2023, CP 124, CCT).
+
+4. **Module 4 — Preuve Canvas (ChatGPT)** (sans limite)
+   Vérification de l'accès à l'outil Canvas de ChatGPT via analyse d'image par Gemini 2.0 Flash.
+
+## 🎨 Interface utilisateur
+
+- **Navigation modulaire** : Dashboard → Détail module → Module actif → Retour au dashboard
+- **Système de scoring visuel** : badges colorés (🟢 vert ≥95%, 🟠 orange 90-95%, 🔴 rouge <90%)
+- **Modules terminés désactivés** : empêche les tentatives multiples
+- **Rapport PDF unifié** : récapitulatif de tous les modules avec détails par section
+
+## ⚙️ Architecture technique
+
+- **Front** : React/Vite avec navigation par état (flat design moderne)
+- **Backend** : 4 Netlify Functions serverless
+  - `analyze-upload.js` : analyse Excel (module 1)
+  - `analyze-collaboration.js` : évaluation dialogue IA (module 2)
+  - `evaluate-legal-training.js` : correction questions législation (module 3)
+  - `detect-canvas-icon.js` : détection Canvas via Gemini 2.0 Flash (module 4)
+- **Stockage** : Netlify Blobs + Google Sheets (archivage et traçabilité)
 
 Une documentation plus exhaustive est disponible dans `docs/README.md`.
 
@@ -27,7 +53,7 @@ npm install
 node reference-generator.js "data/infos extraites CSS.xlsx" --out=data/reference.json
 ```
 
-Le script lit le fichier Excel saisi de référence et produit un JSON utilisé par la fonction d’analyse.
+Le script lit le fichier Excel saisi de référence et produit un JSON utilisé par la fonction d'analyse.
 
 ## Lancer en local
 
@@ -38,8 +64,8 @@ npm install -g netlify-cli  # une seule fois
 netlify dev
 ```
 
-- Accès via l’URL indiquée par Netlify (souvent `http://localhost:8888`).
-- Le proxy redirige `/.netlify/functions/analyze-upload` vers la fonction locale, permettant d’analyser un Excel et d’obtenir un score.
+- Accès via l'URL indiquée par Netlify (souvent `http://localhost:8888`).
+- Le proxy redirige `/.netlify/functions/*` vers les fonctions locales, permettant de tester tous les modules.
 
 ### Option front seul
 
@@ -47,11 +73,11 @@ netlify dev
 npm run dev -- --host 127.0.0.1 --port 5174
 ```
 
-- Sert uniquement l’interface Vite. L’analyse renverra une erreur tant que la fonction n’est pas démarrée.
+- Sert uniquement l'interface Vite. Les analyses renverront une erreur tant que les fonctions ne sont pas démarrées.
 
 ## Déploiement Netlify
 
-`netlify.toml` décrit la configuration :
+`netlify.toml` décrit la configuration :
 
 ```toml
 [build]
@@ -64,10 +90,10 @@ npm run dev -- --host 127.0.0.1 --port 5174
 ```
 
 - **Build statique** : Netlify exécute `npm run build` (Vite) et publie `dist` sur le CDN.
-- **Functions** : chaque fichier dans `netlify/functions/` est exposé sous `/.netlify/functions/<nom>` ; ici `analyze-upload`.
-  - Endpoints additionnels: `analyze-collaboration`, `evaluate-legal-training`, `detect-canvas-icon`.
+- **Functions** : chaque fichier dans `netlify/functions/` est exposé sous `/.netlify/functions/<nom>`.
+  - Endpoints : `analyze-upload`, `analyze-collaboration`, `evaluate-legal-training`, `detect-canvas-icon`.
 
-## Variables d’environnement (Google Sheets)
+## Variables d'environnement (Google Sheets)
 
 | Variable | Description |
 | --- | --- |
@@ -75,34 +101,30 @@ npm run dev -- --host 127.0.0.1 --port 5174
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | Clé privée (remplacer `\n` par des retours à la ligne réels) |
 | `GOOGLE_SHEETS_ID` | Identifiant du Google Sheet destinataire |
 
-Sans ces variables, l’analyse fonctionne mais l’archivage dans Google Sheets est désactivé (un message est renvoyé à l’utilisateur).
+Sans ces variables, l'analyse fonctionne mais l'archivage dans Google Sheets est désactivé (un message est renvoyé à l'utilisateur).
 
-## Variables d’environnement (Gemini)
+## Variables d'environnement (Gemini)
 
 | Variable | Description |
 | --- | --- |
-| `GEMINI_API_KEY` | Clé API Google Generative AI utilisée par les fonctions (analyse, législation, détection Canvas). |
-
-## Module 4 — Preuve Canvas
-
-- Dans l’interface, chargez une capture d’écran de la zone de saisie ChatGPT montrant l’outil « Canvas ».
-- L’endpoint `/.netlify/functions/detect-canvas-icon` utilise le modèle `gemini-2.5-flash-preview-image` pour détecter l’icône et renvoie `{ canvasDetected, confidence, evidence }`.
+| `GEMINI_API_KEY` | Clé API Google Generative AI utilisée par les fonctions (analyse collaboration, législation, détection Canvas). |
 
 ## Stockage des fichiers utilisateurs
 
-La fonction utilise `@netlify/blobs` pour conserver une copie du fichier Excel soumis (`store: cosep-uploads`). En environnement local ou si Blobs est indisponible, la fonction continue son exécution et mentionne simplement que l’archivage n’a pas été effectué.
+Les fonctions utilisent `@netlify/blobs` pour conserver des copies des fichiers soumis (`store: cosep-uploads`). En environnement local ou si Blobs est indisponible, les fonctions continuent leur exécution et mentionnent simplement que l'archivage n'a pas été effectué.
 
 ## Structure du projet
 
-- `src/` : code React (UI, chrono, upload)
+- `src/` : code React (UI, navigation modulaire, chronos, uploads)
 - `public/documents/` : documents mis à disposition des candidats (PDF)
-- `data/reference.json` : référentiel généré depuis l’Excel validé
-- `netlify/functions/analyze-upload.js` : analyse de conformité et archivage
+- `data/reference.json` : référentiel généré depuis l'Excel validé (module 1)
+- `netlify/functions/` : 4 fonctions serverless (analyse, collaboration, législation, Canvas)
 - `reference-generator.js` : utilitaire pour mettre à jour `reference.json`
 - `docs/` : documentation détaillée (architecture, scoring, checklist de déploiement)
 
 ## Prochaines évolutions possibles
 
-- Ajouter le plan réel (`public/documents/plan.pdf`) ou adapter les liens dans `src/App.jsx`.
-- Ajuster la pondération/les seuils de similarité dans la fonction d’analyse selon les retours.
-- Brancher un moteur IA externe (Gemini, Vertex, etc.) pour enrichir encore l’analyse de collaboration.
+- Ajouter d'autres modules d'évaluation (ex: communication, gestion de projet)
+- Améliorer les prompts Gemini pour une détection plus robuste
+- Ajouter un tableau de bord administrateur pour suivre les résultats en temps réel
+- Exporter les données vers d'autres formats (CSV, JSON)
