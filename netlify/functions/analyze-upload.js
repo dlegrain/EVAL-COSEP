@@ -43,6 +43,107 @@ const parseUserWorkbook = (buffer) => {
   return userEntries;
 };
 
+// Strict validation and batching configuration
+const MAX_MESSAGE_LEN = 160;
+const BATCH_SIZE = 15; // keep batches small to avoid output truncation
+
+const clampScore = (n) => {
+  const num = Number(n);
+  if (Number.isNaN(num)) return 0;
+  return Math.max(0, Math.min(100, Math.round(num)));
+};
+
+const truncate = (s, max = MAX_MESSAGE_LEN) => {
+  const str = String(s || '');
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+};
+
+const chunkArray = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
+const buildStrictPromptForBatch = ({ batchRefs, userExcelText }) => {
+  const referenceItems = batchRefs
+    .map((ref, index) => {
+      return `${index + 1}. Section attendue: "${ref.section}"
+   Valeur attendue: "${ref.expected}"
+   ${ref.extras && Object.keys(ref.extras).length > 0 ? `Infos complémentaires: ${JSON.stringify(ref.extras)}` : ''}`;
+    })
+    .join('\n\n');
+
+  const prompt = `Tu es un auditeur ULTRA-STRICT en conformité de sécurité chantier. Compare chaque section UTILISATEUR au RÉFÉRENTIEL.
+
+RÈGLE ABSOLUE: seule la reformulation lexicale est tolérée. Toute différence de SENS/FAIT/EXIGENCE/PORTÉE/STATUT = score 0%.
+
+RÉFÉRENTIEL (${batchRefs.length} items, ordre à respecter strictement):
+${referenceItems}
+
+FICHIER EXCEL UTILISATEUR (sections/valeurs telles que détectées):
+${userExcelText}
+
+Consignes de sortie STRICTES:
+- RENDS EXACTEMENT ${batchRefs.length} objets dans "items".
+- UN OBJET PAR SECTION du référentiel, dans le MÊME ORDRE, et COPIE "section" À L’IDENTIQUE (mêmes caractères).
+- Pour chaque objet, fournis uniquement les champs: section, score, message, userValue.
+- Si la section n’existe pas ou ne correspond pas strictement au référentiel côté utilisateur: userValue="", score=0, message="Information absente".
+- Limite "message" à 120 caractères, clair et factuel.
+- N’AJOUTE AUCUN AUTRE CHAMP, AUCUN TEXTE HORS JSON, PAS DE "...".
+
+Grille de scoring (rappel condensé):
+- 0%: fait/statut/portée/procédure opposés ou élément critique manquant
+- 95–100%: équivalence stricte de sens et de faits (synonymes OK)
+
+RÉPONSE ATTENDUE (JSON strict UNIQUEMENT - EXEMPLE SCHÉMATIQUE):
+{
+  "items": [
+    { "section": "${batchRefs[0].section}", "score": 100, "message": "Conforme", "userValue": "…" }
+  ]
+}`;
+
+  return prompt;
+};
+
+const parseJsonObjectFromText = (text) => {
+  const jsonMatch = String(text || '').match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  try {
+    return JSON.parse(jsonMatch[0]);
+  } catch (_) {
+    return null;
+  }
+};
+
+const validateAndNormalizeBatch = ({ expectedSections, json }) => {
+  const out = [];
+  const items = Array.isArray(json?.items) ? json.items : [];
+
+  for (let i = 0; i < expectedSections.length; i++) {
+    const expectedSection = expectedSections[i];
+    const item = items.find((it) => it && it.section === expectedSection);
+
+    if (!item) {
+      out.push({
+        section: expectedSection,
+        score: 0,
+        message: 'Non analysé (ajout auto)',
+        userValue: '',
+      });
+      continue;
+    }
+
+    out.push({
+      section: expectedSection,
+      score: clampScore(item.score),
+      message: truncate(item.message || ''),
+      userValue: String(item.userValue || ''),
+    });
+  }
+
+  return out;
+};
+
 const buildComparisonWithGemini = async (userEntries) => {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -53,140 +154,62 @@ const buildComparisonWithGemini = async (userEntries) => {
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-  // Construire une représentation texte de l'Excel utilisateur
+  // Représentation texte de l'Excel utilisateur
   const userExcelText = userEntries
     .map((entry) => `"${entry.section}": "${entry.value}"`)
     .join('\n');
 
-  // Construire la liste des items de référence
-  const referenceItems = referenceEntries
-    .map((ref, index) => {
-      return `${index + 1}. Section attendue: "${ref.section}"
-   Valeur attendue: "${ref.expected}"
-   ${ref.extras && Object.keys(ref.extras).length > 0 ? `Infos complémentaires: ${JSON.stringify(ref.extras)}` : ''}`;
-    })
-    .join('\n\n');
+  const batches = chunkArray(referenceEntries, BATCH_SIZE);
+  const allItems = [];
 
-  const prompt = `Tu es un auditeur ULTRA-STRICT en conformité de sécurité chantier. Tu dois vérifier si un fichier Excel utilisateur contient EXACTEMENT les mêmes informations factuelles que le RÉFÉRENTIEL.
+  for (const batchRefs of batches) {
+    const expectedSections = batchRefs.map((r) => r.section);
+    const prompt = buildStrictPromptForBatch({ batchRefs, userExcelText });
 
-**RÈGLE ABSOLUE** : Seule la reformulation LEXICALE est autorisée (synonymes). Toute différence de SENS, de FAIT, d'EXIGENCE ou de STATUT = score 0%.
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const text = response.text();
+    const json = parseJsonObjectFromText(text);
 
-RÉFÉRENTIEL (${referenceEntries.length} items obligatoires):
-${referenceItems}
-
-FICHIER EXCEL UTILISATEUR:
-${userExcelText}
-
-GRILLE DE SCORING ULTRA-STRICTE:
-
-**Score 0% (NON-CONFORME TOTAL):**
-- Information ABSENTE
-- Information OPPOSÉE sur les faits (ex: "Non signalée" ≠ "Présence confirmée")
-- Changement de STATUT (ex: "Obligatoire" ≠ "Recommandé", "Interdit" ≠ "Autorisé")
-- Changement de PROCÉDURE (ex: "Séparé" ≠ "Centralisé", "Étanche" ≠ "Sol nu")
-- Changement de PORTÉE (ex: "En tout temps" ≠ "Phases critiques seulement")
-- Information INCOMPLÈTE sur un élément de sécurité CRITIQUE
-
-**Score 95-100% (CONFORME):**
-- Information IDENTIQUE au niveau du sens ET des faits
-- Reformulation lexicale acceptée UNIQUEMENT si le sens est strictement identique
-- Exemples acceptables:
-  * "Description sommaire du chantier" ≈ "Aperçu général des travaux" (même concept, aucune info perdue)
-  * "Sans objet" ≈ "N/A" ≈ "Non applicable" (strictement équivalent)
-  * "Port du casque obligatoire en tout temps" ≈ "Casque requis en permanence" (même obligation, même portée)
-
-EXEMPLES DE SCORING (À SUIVRE ABSOLUMENT):
-
-EXEMPLE 1 - Score 0%:
-- Référence: "Port du casque, gilet fluorescent et chaussures de sécurité obligatoire en tout temps."
-- Utilisateur: "Équipements recommandés uniquement lors des phases critiques."
-- Score: 0% (obligatoire ≠ recommandé, tout temps ≠ phases critiques = changement de statut ET de portée)
-- Message: "Non-conformité totale: obligations de sécurité remplacées par recommandations ponctuelles"
-
-EXEMPLE 2 - Score 0%:
-- Référence: "Gestion séparée des huiles, carburants et bétons ; zone de remplissage étanche."
-- Utilisateur: "Gestion centralisée sans séparation des produits ; stockage temporaire sur sol nu."
-- Score: 0% (séparée ≠ centralisée, étanche ≠ sol nu = procédures opposées)
-- Message: "Non-conformité totale: procédure de séparation ignorée, zone étanche absente"
-
-EXEMPLE 3 - Score 0%:
-- Référence: "Non signalée dans les documents. Vigilance en cas de découverte fortuite (procédure stop-work)."
-- Utilisateur: "Présence confirmée selon rapport externe. Vigilance en cas de découverte fortuite (procédure stop-work)."
-- Score: 0% (Non signalée ≠ Présence confirmée = FAITS OPPOSÉS, implique protocoles totalement différents)
-- Message: "Non-conformité totale: statut amiante opposé au référentiel (signalée vs non signalée), protocoles de sécurité incompatibles"
-
-EXEMPLE 4 - Score 100%:
-- Référence: "Sans objet (pas de réseaux ECS)"
-- Utilisateur: "N/A - aucun réseau ECS présent"
-- Score: 100% (équivalence stricte, même fait)
-- Message: "Conforme"
-
-EXEMPLE 5 - Score 100%:
-- Référence: "Maintien accès usagers TEC et riverains durant travaux"
-- Utilisateur: "Assurer la continuité d'accès pour les usagers TEC et les riverains pendant les travaux"
-- Score: 100% (reformulation parfaite, même exigence)
-- Message: "Conforme"
-
-CONSIGNES CRITIQUES:
-1. LIS CHAQUE VALEUR ATTENDUE **MOT PAR MOT**
-2. LIS CHAQUE VALEUR UTILISATEUR **MOT PAR MOT**
-3. COMPARE LES **FAITS**, pas les mots
-4. Si tu hésites entre 0% et 100%, choisis 0% (principe de sécurité maximale)
-5. Tout changement de fait, statut, exigence, portée = 0% AUTOMATIQUEMENT
-6. N'utilise JAMAIS de scores intermédiaires (50%, 70%) sauf si vraiment justifié
-
-IMPORTANT - CAS PIÈGES FRÉQUENTS:
-- "Obligatoire" vs "Recommandé" = 0% (changement de statut)
-- "Non signalée" vs "Présence confirmée" = 0% (faits opposés)
-- "En tout temps" vs "Pendant phases critiques" = 0% (changement de portée)
-- "Séparé" vs "Centralisé" = 0% (changement de procédure)
-- Élément manquant dans liste de sécurité = 0% (incomplet)
-
-RÉPONSE ATTENDUE (JSON strict, aucun texte avant ou après):
-{
-  "items": [
-    {
-      "section": "1.5 Amiante",
-      "score": 0,
-      "message": "Non-conformité totale: statut amiante opposé (signalée vs non signalée)",
-      "userSection": "Amiante",
-      "userValue": "Présence confirmée selon rapport externe"
-    },
-    ...
-  ]
-}
-
-Analyse TOUS les ${referenceEntries.length} items avec RIGUEUR MAXIMALE. En cas de doute, choisis 0%.`;
-
-  const result = await model.generateContent(prompt);
-  const response = result.response;
-  const text = response.text();
-
-  // Extraction du JSON
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('Format de réponse Gemini invalide');
+    const normalized = validateAndNormalizeBatch({ expectedSections, json });
+    for (let i = 0; i < normalized.length; i++) {
+      const norm = normalized[i];
+      const ref = batchRefs[i];
+      allItems.push({
+        section: norm.section,
+        score: clampScore(norm.score),
+        message: truncate(norm.message || ''),
+        expectedSnippet: ref.expected || '',
+        receivedSnippet: String(norm.userValue || ''),
+      });
+    }
   }
 
-  const geminiResult = JSON.parse(jsonMatch[0]);
+  // Contrôle de complétude global; ajout de garde-fous si besoin
+  if (allItems.length !== referenceEntries.length) {
+    const expectedSet = new Set(referenceEntries.map((r) => r.section));
+    const seenSet = new Set(allItems.map((i) => i.section));
+    for (const ref of referenceEntries) {
+      if (!seenSet.has(ref.section)) {
+        allItems.push({
+          section: ref.section,
+          score: 0,
+          message: 'Non analysé (ajout auto)',
+          expectedSnippet: ref.expected || '',
+          receivedSnippet: '',
+        });
+      }
+    }
+  }
 
-  // Transformation au format attendu
-  const issues = geminiResult.items.map((item) => ({
-    section: item.section,
-    score: Math.max(0, Math.min(100, item.score)),
-    message: item.message || '',
-    expectedSnippet: referenceEntries.find((ref) => ref.section === item.section)?.expected || '',
-    receivedSnippet: item.userValue || '',
-  }));
+  const totalScore = allItems.reduce((sum, item) => sum + clampScore(item.score), 0);
+  const avgScore = allItems.length > 0 ? totalScore / allItems.length : 0;
 
-  const totalScore = issues.reduce((sum, item) => sum + item.score, 0);
-  const avgScore = issues.length > 0 ? totalScore / issues.length : 0;
-
-  issues.sort((a, b) => a.score - b.score);
+  allItems.sort((a, b) => a.score - b.score);
 
   return {
     score: Number(avgScore.toFixed(1)),
-    details: issues,
+    details: allItems,
   };
 };
 

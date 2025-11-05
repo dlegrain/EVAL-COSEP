@@ -204,9 +204,10 @@ export default function App() {
     ];
 
     if (collaboration) {
+      const overallPct = Math.round((collaboration.overall ?? 0) * 20);
       statCards.push({
         title: 'Score collaboration',
-        value: `${(collaboration.overall ?? 0).toFixed(1)}/5`,
+        value: `${overallPct}% (${(collaboration.overall ?? 0).toFixed(1)}/5)`,
         subtitle: 'Qualité humain–IA',
         color: [23, 125, 91],
       });
@@ -217,13 +218,16 @@ export default function App() {
     const cardGap = 18;
 
     const drawStatCard = (x, y, { title, value, subtitle, color }) => {
-      doc.setFillColor(...color, 20);
+      // Fond très clair pour lisibilité
+      doc.setFillColor(240, 246, 255);
       doc.setDrawColor(color[0], color[1], color[2]);
       doc.roundedRect(x, y, cardWidth, cardHeight, 12, 12, 'FD');
+      // Titre en couleur, valeurs en sombre
       doc.setTextColor(color[0], color[1], color[2]);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(12);
       doc.text(title, x + 16, y + 24);
+      doc.setTextColor(33, 37, 41);
       doc.setFontSize(26);
       doc.text(value, x + 16, y + 54);
       doc.setFont('helvetica', 'normal');
@@ -270,12 +274,13 @@ export default function App() {
         textColor: [33, 37, 41],
         lineColor: [226, 232, 240],
         lineWidth: 0.2,
+        overflow: 'linebreak',
       },
       alternateRowStyles: { fillColor: [246, 249, 255] },
       columnStyles: {
         0: { cellWidth: 200 },
         1: { cellWidth: 70, halign: 'center' },
-        2: { cellWidth: 230 },
+        2: { cellWidth: 230, overflow: 'linebreak', valign: 'top' },
       },
     });
 
@@ -325,7 +330,7 @@ export default function App() {
 
       const collabRows = Object.values(collaboration.scores || {}).map((value) => [
         value.label || '-',
-        `${value.score.toFixed(1)}/5`,
+        `${value.score.toFixed(1)}/5 (${Math.round(value.score * 20)}%)`,
         value.comment,
         value.example || '',
       ]);
@@ -343,13 +348,14 @@ export default function App() {
             textColor: [33, 37, 41],
             lineColor: [226, 232, 240],
             lineWidth: 0.2,
+            overflow: 'linebreak',
           },
           alternateRowStyles: { fillColor: [246, 248, 255] },
           columnStyles: {
-            0: { cellWidth: 150 },
-            1: { cellWidth: 60, halign: 'center' },
-            2: { cellWidth: 170 },
-            3: { cellWidth: 140 },
+            0: { cellWidth: 140 },
+            1: { cellWidth: 90, halign: 'center' },
+            2: { cellWidth: 170, overflow: 'linebreak', valign: 'top' },
+            3: { cellWidth: 120, overflow: 'linebreak', valign: 'top' },
           },
         });
         cursorY = doc.lastAutoTable.finalY + 18;
@@ -364,16 +370,33 @@ export default function App() {
           doc.addPage();
           cursorY = 72;
         }
+        // Boîte de section pour lisibilité
+        const boxX = marginX;
+        const boxW = pageWidth - marginX * 2;
+        doc.setFillColor(248, 251, 255);
+        doc.setDrawColor(210, 224, 255);
+        const boxStartY = cursorY;
+        // Titre
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(12);
-        doc.text(title, marginX, cursorY);
-        cursorY += 16;
+        doc.text(title, boxX, cursorY + 16);
+        cursorY += 32;
         doc.setFont('helvetica', 'normal');
+        const maxWidth = boxW - 16;
         items.forEach((item) => {
-          doc.text(`• ${item}`, marginX, cursorY);
-          cursorY += 14;
+          const lines = doc.splitTextToSize(`• ${item}`, maxWidth);
+          doc.text(lines, boxX + 8, cursorY, { maxWidth });
+          cursorY += lines.length * 12 + 4;
+          if (cursorY > 760) {
+            // Fermer la boîte et passer à la page suivante
+            doc.roundedRect(boxX, boxStartY + 6, boxW, cursorY - boxStartY, 8, 8);
+            doc.addPage();
+            cursorY = 72;
+          }
         });
-        cursorY += 12;
+        // Dessiner la boîte autour de la section
+        doc.roundedRect(boxX, boxStartY + 6, boxW, cursorY - boxStartY, 8, 8);
+        cursorY += 8;
       };
 
       listSection('Points forts', advice.strengths);
@@ -488,8 +511,14 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const progressPct = collaboration ? 100 : analysis ? 50 : 0;
+
   return (
-    <div className="page">
+    <div className="layout">
+      <div className="progress-rail">
+        <div className="progress-fill" style={{ height: `${progressPct}vh` }} />
+      </div>
+      <main className="page">
       <div className="card">
         <h1>EVAL COSEP — Extraction du cahier des charges</h1>
         <p>
@@ -501,7 +530,7 @@ export default function App() {
 
       {phase === 'identify' && (
         <div className="card">
-          <h2>1. Identifiez-vous pour démarrer</h2>
+          <h2 id="task-1">1. Identifiez-vous pour démarrer</h2>
           <p className="status">Le chronomètre commencera dès que vous accéderez aux documents.</p>
           <div className="form-row">
             <label>
@@ -521,7 +550,7 @@ export default function App() {
 
       {phase !== 'identify' && (
         <div className="card">
-          <h2>2. Mission et documents</h2>
+          <h2 id="task-2">2. Mission et documents</h2>
           <p>
             Vous disposez de 30 minutes à partir du téléchargement des documents. Ce délai peut être dépassé, mais
             il sera enregistré dans l’analyse finale.
@@ -553,7 +582,7 @@ export default function App() {
 
       {phase !== 'identify' && (
         <div className="card">
-          <h2>3. Déposez votre fichier Excel d’analyse</h2>
+          <h2 id="task-3">3. Déposez votre fichier Excel d’analyse</h2>
           <form onSubmit={handleSubmit}>
             <div className="upload-zone">
               <p>Glissez votre fichier Excel ici ou utilisez le sélecteur ci-dessous.</p>
@@ -572,7 +601,7 @@ export default function App() {
 
       {analysis && (
         <div className="card">
-          <h2>4. Résultat de l’analyse</h2>
+          <h2 id="task-4">4. Résultat de l’analyse</h2>
           <div className="results">
             <div className="results-header">
               <div>
@@ -630,7 +659,7 @@ export default function App() {
 
       {analysis && (
         <div className="card">
-          <h2>5. Analyse de la collaboration humain–IA</h2>
+          <h2 id="task-5">5. Analyse de la collaboration humain–IA</h2>
           <p>
             Collez ci-dessous l’intégralité de votre échange avec l’IA (ChatGPT, Gemini, etc.). Le système analyse la qualité de
             la collaboration et vous fournit un diagnostic critique.
@@ -656,7 +685,7 @@ export default function App() {
             <div className="collab-results">
               <div className="collab-overview">
                 <span className="collab-overall">
-                  Score global collaboration : {collaboration.overall?.toFixed(1) ?? '0.0'}/5
+                  Score global collaboration : {collaboration.overall?.toFixed(1) ?? '0.0'}/5 ({Math.round((collaboration.overall ?? 0) * 20)}%)
                 </span>
                 {collaboration.storage && (
                   <span className="collab-status">
@@ -672,13 +701,13 @@ export default function App() {
               <div className="collab-table">
                 <div className="collab-header">
                   <span>Critère</span>
-                  <span>Score /5</span>
+                  <span>Score</span>
                   <span>Commentaire</span>
                 </div>
                 {Object.entries(collaboration.scores || {}).map(([key, value]) => (
                   <div key={key} className="collab-row">
                     <span className="collab-criterion">{value.label || key}</span>
-                    <span className="collab-score">{value.score.toFixed(1)}</span>
+                    <span className="collab-score">{value.score.toFixed(1)}/5 ({Math.round(value.score * 20)}%)</span>
                     <span className="collab-comment">
                       {value.comment}
                       {value.example && <span className="collab-example">{value.example}</span>}
@@ -728,6 +757,7 @@ export default function App() {
           </button>
         </div>
       )}
+      </main>
     </div>
   );
 }

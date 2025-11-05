@@ -25,6 +25,32 @@ a {
   padding: 2rem 1.5rem 4rem;
 }
 
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+/* Vertical progress gauge */
+.progress-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 10px;
+  height: 100vh;
+  background: #e6eeff;
+  z-index: 999;
+}
+
+.progress-fill {
+  width: 100%;
+  height: 0;
+  background: linear-gradient(180deg, #2f6bff 0%, #0058ff 100%);
+  box-shadow: 0 0 16px rgba(0, 88, 255, 0.4);
+  transition: height 0.4s ease;
+}
+
 .card {
   background: #ffffff;
   border-radius: 12px;
