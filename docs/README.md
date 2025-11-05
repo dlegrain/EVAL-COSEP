@@ -36,6 +36,8 @@ Flux principal :
   - Timer mis à jour toutes les secondes, affichage « hors délai » si >30 minutes.
   - Upload type `<input type="file">` (accept `.xls,.xlsx`) → conversion en base64.
   - Appel à `/.netlify/functions/analyze-upload` via `fetch`.
+  - Zone de collage collaboration avec interception `onPaste` : récupération du contenu HTML (ChatGPT/Gemini) et conversion en texte pour conserver toute la conversation.
+  - Nettoyage automatique des marqueurs `You said / ChatGPT said` pour séparer clairement les tours dans l’analyse.
   - Restitution des résultats (score%, liste d’issues, info stockage/Google Sheet).
 
 - `src/styles.css`
@@ -114,9 +116,9 @@ Les seuils/messageries sont dans `buildComparison`.
 
 - `netlify/functions/analyze-collaboration.js`
   - Reçoit le transcript complet (texte brut) collé par l’utilisateur.
-  - Analyse heuristique : segmentation en tours, comptage de mots/questions, détection de mots-clés (objectif, conseil, réaction…).
-  - Calcule six scores normalisés 0–5 (intention, dialogue, conseils, réaction, richesse, délégation) + score global.
-  - Produit un diagnostic (commentaires + listes points forts / axes d’amélioration / conseils personnalisés).
+  - Analyse heuristique : segmentation en tours (prise en charge de marqueurs “You said / ChatGPT said”), comptage de mots/questions, détection de mots-clés (objectifs, conseils, exécution), rapprochement des suggestions IA vs réponses utilisateur.
+  - Calcule six scores normalisés 0–5 (intention, dialogue, conseils, réaction, richesse, délégation) + score global, avec exemples concrets extraits et nettoyés du transcript.
+  - Produit un diagnostic (commentaires + exemples + listes points forts / axes d’amélioration / conseils personnalisés).
   - Archive la conversation dans Netlify Blobs (`cosep-uploads/collaboration/...`).
   - Enregistre un résumé dans Google Sheets (type de ligne `collaboration`, score converti /100, synthèse critique).
 

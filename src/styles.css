@@ -336,6 +336,14 @@ textarea {
   font-size: 0.95rem;
 }
 
+.collab-example {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+  color: #1d2a4a;
+  font-style: italic;
+}
+
 .collab-advice {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

@@ -3,155 +3,394 @@ import { google } from 'googleapis';
 
 const clamp = (value, min = 0, max = 5) => Math.max(min, Math.min(max, value));
 
-const keywordCount = (text, keywords) =>
-  keywords.reduce((total, keyword) => {
-    const matches = text.match(new RegExp(keyword, 'gi'));
-    return total + (matches ? matches.length : 0);
-  }, 0);
+const WORD_REGEX = /[\p{L}\p{N}][\p{L}\p{N}'’\-]*/gu;
 
-const computeMetrics = (transcript) => {
-  const cleaned = transcript.trim();
-  const blocks = cleaned.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
-  const lines = cleaned.split('\n').filter((line) => line.trim().length > 0);
-  const words = cleaned.split(/\s+/).filter(Boolean);
-  const uniqueWords = new Set(words.map((w) => w.toLowerCase().replace(/[^a-zàâçéèêëîïôûùüÿñæœ0-9]/gi, ''))).size;
-  const questions = (cleaned.match(/\?/g) || []).length;
+const extractWords = (text) => {
+  const matches = text.match(WORD_REGEX);
+  return matches ? matches.map((word) => word.toLowerCase()) : [];
+};
 
-  const userTurns = blocks.filter(
-    (block) =>
-      /^user\b/i.test(block) ||
-      /^utilisateur\b/i.test(block) ||
-      block.toLowerCase().startsWith('moi :') ||
-      block.toLowerCase().startsWith('moi:')
-  ).length;
+const sanitizeSnippet = (text) =>
+  text
+    .replace(/(chatgpt|assistant|you|user)\s+said\s*:?/gi, '')
+    .replace(/stopped\s+(?:reading|searching)\s+\w+/gi, '')
+    .replace(/\bhttps?:\/\/\S+/gi, '')
+    .replace(/\b\S+\.(pdf|docx?|xlsx|pptx?)\b/gi, '')
+    .replace(/\b\S+\.(pdf|docx?|xlsx|pptx?)\s*pdf\b/gi, '')
+    .replace(/\bpdf\b/gi, '')
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const assistantTurns = blocks.filter(
-    (block) =>
-      /^assistant\b/i.test(block) ||
-      /^ia\b/i.test(block) ||
-      block.toLowerCase().startsWith('ia :') ||
-      block.toLowerCase().startsWith('ia:')
-  ).length;
+const excerpt = (text, max = 160) => {
+  if (!text) {
+    return '';
+  }
+  const cleaned = sanitizeSnippet(text);
+  if (!cleaned) {
+    return '';
+  }
+  return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned;
+};
+
+const containsAny = (text, patterns) => patterns.some((pattern) => pattern.test(text));
+
+const ADVICE_PATTERNS = [
+  /conseil/i,
+  /recommand/i,
+  /avis/i,
+  /opinion/i,
+  /point de vue/i,
+  /angle/i,
+  /strat[ée]gie/i,
+  /alternativ/i,
+  /variante/i,
+  /risque/i,
+  /opportunit/i,
+  /feedback/i,
+  /discut/i,
+  /brainstorm/i,
+  /explor/i,
+  /peux-tu\s+m'aider/i,
+  /aide-moi/i,
+  /aide\s+?moi/i,
+  /que\s+penses-tu/i,
+  /ton\s+avis/i,
+  /que\s+(?:me|nous)\s+conseilles-tu/i,
+  /que\s+proposerais-tu/i,
+  /que\s+proposes-tu/i,
+  /quelles?\s+recommandations?/i,
+  /quelles?\s+approches?/i,
+  /quelles?\s+options?/i,
+  /quelles?\s+alternatives?/i,
+];
+
+const DEEP_QUESTION_PATTERNS = [
+  /pourquoi/i,
+  /comment/i,
+  /quels?\s+risques?/i,
+  /quelles?\s+cons[eé]quences?/i,
+  /que\s+devrions?-?nous/i,
+  /que\s+ferais-tu/i,
+  /quelle\s+d[ée]marche/i,
+  /quelle\s+strat[ée]gie/i,
+  /quel\s+plan/i,
+  /pouvons?-?nous\s+discuter/i,
+  /explorons?/i,
+  /discuter/i,
+];
+
+const EXECUTION_PATTERNS = [
+  /résum/i,
+  /sommaire/i,
+  /donne[-\s]?moi/i,
+  /peux-tu\s+(?:me\s+)?(?:donner|fournir|lister|r[ée]diger|produire|g[ée]n[ée]rer|cr[eé]er)/i,
+  /pourrais-tu\s+(?:me\s+)?(?:donner|fournir|lister|produire|cr[eé]er)/i,
+  /liste(?:-moi)?/i,
+  /extrait/i,
+  /copie/i,
+  /transcri/i,
+  /r[eé]dige/i,
+  /[ée]cris/i,
+  /fais(?:\s+)?un\s+tableau/i,
+  /tradui/i,
+  /g[ée]n[ée]re/i,
+  /peux-tu\s+m'\s?indiquer/i,
+];
+
+const USER_PREFIXES = [
+  /^(utilisateur|user|moi|humain|human|collaborateur|pilote|chef|client)\s*[:\-]/i,
+  /^(you\s+said|vous\s+avez\s+dit|you)\s*[:\-]/i,
+  /^\s*U\s*[:\-]/i,
+];
+
+const ASSISTANT_PREFIXES = [
+  /^(assistant|ia|ai|bot|chatgpt|gpt|gemini|copilot|assistant virtuel)\s*[:\-]/i,
+  /^(chatgpt\s+said|l['’]ia\s+a\s+répondu)\s*[:\-]/i,
+  /^\s*A\s*[:\-]/i,
+];
+
+const detectSpeaker = (line) => {
+  const sanitized = line.replace(/[“”]/g, '"');
+  for (const regex of USER_PREFIXES) {
+    if (regex.test(sanitized)) {
+      return { speaker: 'user', cleaned: sanitized.replace(regex, '').trim() };
+    }
+  }
+  for (const regex of ASSISTANT_PREFIXES) {
+    if (regex.test(sanitized)) {
+      return { speaker: 'assistant', cleaned: sanitized.replace(regex, '').trim() };
+    }
+  }
+  return null;
+};
+
+const parseTranscript = (transcript) => {
+  const normalized = transcript.replace(/\r\n/g, '\n');
+  const markerRegex = /(You\s+said\s*:|You\s*:|Vous\s+avez\s+dit\s*:|Tu\s+as\s+dit\s*:|Utilisateur\s*:|User\s*:|Moi\s*:|ChatGPT\s+said\s*:|ChatGPT\s*:|Assistant\s+said\s*:|Assistant\s*:|IA\s*:|AI\s*:|Bot\s*:)/gi;
+  const segmented = normalized.replace(markerRegex, '\n$1');
+  const collapsed = segmented.replace(/\n{2,}/g, '\n').trim();
+  const lines = collapsed.split('\n');
+  const turns = [];
+  let current = null;
+
+  lines.forEach((rawLine) => {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const detection = detectSpeaker(trimmed);
+    let speaker;
+    let content = trimmed;
+
+    if (detection) {
+      ({ speaker } = detection);
+      content = detection.cleaned;
+    } else if (/^[-•*]/.test(trimmed) && current) {
+      speaker = current.speaker;
+      content = trimmed.replace(/^[-•*]\s*/, '');
+    } else if (!current) {
+      speaker = 'user';
+    } else {
+      speaker = current.speaker;
+    }
+
+    if (!content) {
+      return;
+    }
+
+    if (!current || current.speaker !== speaker) {
+      if (current) {
+        current.text = current.text.join(' ');
+        current.words = extractWords(current.text);
+        current.wordCount = current.words.length;
+        current.sentences = current.text.split(/[.!?]+/).filter((sentence) => sentence.trim().length > 0);
+        current.questionMarks = (current.text.match(/\?/g) || []).length;
+        turns.push(current);
+      }
+      current = {
+        speaker,
+        text: [content],
+        rawLines: [rawLine],
+      };
+    } else {
+      current.text.push(content);
+      current.rawLines.push(rawLine);
+    }
+  });
+
+  if (current) {
+    current.text = current.text.join(' ');
+    current.words = extractWords(current.text);
+    current.wordCount = current.words.length;
+    current.sentences = current.text.split(/[.!?]+/).filter((sentence) => sentence.trim().length > 0);
+    current.questionMarks = (current.text.match(/\?/g) || []).length;
+    turns.push(current);
+  }
+
+  turns.forEach((turn, index) => {
+    turn.index = index;
+  });
+
+  const userTurns = turns.filter((turn) => turn.speaker === 'user');
+  const assistantTurns = turns.filter((turn) => turn.speaker === 'assistant');
+  const totalUserWords = userTurns.reduce((sum, turn) => sum + turn.wordCount, 0);
+  const uniqueUserWords = new Set(userTurns.flatMap((turn) => turn.words)).size;
+  const totalQuestions = userTurns.reduce((sum, turn) => sum + turn.questionMarks, 0);
 
   return {
-    cleaned,
-    blocks,
-    lines,
-    totalWords: words.length,
-    uniqueWords,
-    questions,
+    turns,
     userTurns,
     assistantTurns,
-    totalTurns: blocks.length,
-    avgWordsPerBlock: blocks.length ? Math.round(words.length / blocks.length) : 0,
-    firstBlock: blocks[0] || '',
-    lastBlock: blocks[blocks.length - 1] || '',
+    totalTurns: turns.length,
+    totalUserWords,
+    uniqueUserWords,
+    totalQuestions,
   };
 };
 
 const evaluateTranscript = (transcript) => {
-  const metrics = computeMetrics(transcript);
-  const { cleaned, firstBlock, totalTurns, questions, totalWords, uniqueWords, avgWordsPerBlock } = metrics;
+  const parsed = parseTranscript(transcript);
+  const { turns, userTurns, assistantTurns, totalTurns, totalUserWords, uniqueUserWords, totalQuestions } = parsed;
 
-  const clarityKeywords = ['objectif', 'but', 'livrable', 'cible', 'contexte', 'contexte', 'mission', 'attendu', 'finalité'];
-  let clarityScore = 1;
-  if (firstBlock.length > 80) clarityScore += 1.2;
-  if (keywordCount(firstBlock, clarityKeywords) >= 2) clarityScore += 2;
-  if (questions > 3) clarityScore += 0.5;
+  const firstUser = userTurns[0];
+  const firstUserText = firstUser?.text || '';
+  const firstUserWordCount = firstUser?.wordCount || 0;
+  const firstUserLower = firstUserText.toLowerCase();
+
+  const clarityKeywords = ['objectif', 'but', 'livrable', 'contexte', 'perimetre', 'périmètre', 'contrainte', 'délai', 'audience', 'livraison'];
+  const clarityKeywordMatches = clarityKeywords.filter((keyword) => firstUserLower.includes(keyword)).length;
+  let clarityScore = 0.5;
+  if (firstUserWordCount >= 60) clarityScore += 3.2;
+  else if (firstUserWordCount >= 35) clarityScore += 2.3;
+  else if (firstUserWordCount >= 20) clarityScore += 1.3;
+  if (clarityKeywordMatches >= 3) clarityScore += 1.2;
+  else if (clarityKeywordMatches >= 1) clarityScore += 0.6;
+  if (firstUser?.questionMarks) clarityScore += 0.3;
   clarityScore = clamp(clarityScore);
-  const clarityComment =
-    clarityScore >= 4.5
-      ? 'Objectif très bien posé et contextualisé.'
-      : clarityScore >= 3.5
-      ? 'Objectif global compris mais peut gagner en précision.'
-      : 'Objectif flou ou mal cadré ; expliciter la finalité et les contraintes.';
+  const clarityComment = firstUser
+    ? `Brief initial de ${firstUserWordCount} mots (${clarityKeywordMatches} mot-clé${clarityKeywordMatches > 1 ? 's' : ''}).`
+    : 'Pas de brief initial explicite détecté.';
+  const clarityExample = firstUser ? excerpt(firstUser.text, 220) : '';
 
-  let dialogueScore = clamp((totalTurns - 4) / 2.5);
-  if (dialogueScore < 1 && totalTurns >= 6) dialogueScore = 1;
-  const dialogueComment =
-    dialogueScore >= 4
-      ? 'Dialogue approfondi avec rebonds fréquents.'
-      : dialogueScore >= 3
-      ? 'Échanges présents mais gagneraient à être plus soutenus.'
-      : 'Interaction trop courte ou monologique ; multiplier les rebonds.';
+  const dialogueScore = clamp((totalTurns - 4) / 2.5 + Math.min(userTurns.length, assistantTurns.length) * 0.15);
+  const dialogueComment = `Tours totaux : ${totalTurns} (utilisateur ${userTurns.length} / IA ${assistantTurns.length}).`;
+  const dialogueExample = (() => {
+    for (let i = 0; i < turns.length - 2; i += 1) {
+      if (turns[i].speaker === 'user' && turns[i + 1].speaker === 'assistant') {
+        const nextUser = turns.slice(i + 2).find((turn) => turn.speaker === 'user');
+        if (nextUser) {
+          return `Tour ${i + 1}: « ${excerpt(turns[i].text, 80)} » → IA : « ${excerpt(turns[i + 1].text, 80)} » → relance : « ${excerpt(nextUser.text, 70)} ». `;
+        }
+      }
+    }
+    return 'Peu de rebonds identifiés après les réponses de l’IA.';
+  })();
 
-  const adviceCount = keywordCount(cleaned, ['conseil', 'conseille', 'alternati', 'option', 'idée', 'recommand', 'stratégie']);
-  const depthQuestions = keywordCount(cleaned, ['pourquoi', 'comment', 'quelle approche', 'quelles options', 'risque']);
-  let adviceScore = clamp(adviceCount * 0.8 + depthQuestions * 0.6);
-  if (questions > 6) adviceScore = clamp(adviceScore + 1);
-  const adviceComment =
-    adviceScore >= 4
-      ? 'Très bonne recherche de points de vue et d’angles.'
-      : adviceScore >= 3
-      ? 'Quelques sollicitations d’angles ; pousser davantage la curiosité stratégique.'
-      : 'Peu de demandes de conseils ou d’alternatives ; solliciter l’IA sur ses idées.';
+  const advicePrompts = userTurns.filter((turn) => {
+    const lower = turn.text.toLowerCase();
+    if (containsAny(lower, EXECUTION_PATTERNS)) {
+      return false;
+    }
+    if (containsAny(lower, ADVICE_PATTERNS)) {
+      return true;
+    }
+    if (turn.questionMarks > 0 && containsAny(lower, DEEP_QUESTION_PATTERNS)) {
+      return true;
+    }
+    return false;
+  });
+  const adviceScore = clamp(advicePrompts.length * 0.9 + Math.min(totalQuestions, 6) * 0.2);
+  const adviceComment = `${advicePrompts.length} sollicitation${advicePrompts.length > 1 ? 's' : ''} de conseils / angles.`;
+  const adviceExample = advicePrompts.length
+    ? `Exemple : « ${excerpt(advicePrompts[0].text, 160)} »`
+    : 'Aucune demande explicite de conseils ou d’alternatives.';
 
-  const reactionKeywords = ['merci', 'je vais', 'je vais tester', 'd’accord', 'je reprends', 'comme proposé', 'j’applique', 'je retiens'];
-  const reactionCount = keywordCount(cleaned, reactionKeywords);
-  let reactionScore = clamp(reactionCount * 1.2);
-  if (reactionScore < 2 && totalTurns > 10) reactionScore += 1;
-  const reactionComment =
-    reactionScore >= 4
-      ? 'Intégration active des suggestions de l’IA.'
-      : reactionScore >= 3
-      ? 'Quelques rebonds sur les propositions ; peut aller plus loin.'
-      : "Peu d'exploitation des suggestions ; valider ou tester explicitement les pistes.";
+  const acknowledgementRegex = /(merci|parfait|je\s+vais|je\s+vais\s+tester|je\s+vais\s+appliquer|je\s+reprends|je\s+ret[iy]ens|je\s+choisis|allons-y|d'accord|ça marche|je valide|ok|bien\s+compris|entendu)/i;
+  const reactionPairs = assistantTurns
+    .map((assistantTurn) => {
+      const nextUser = turns.slice(assistantTurn.index + 1).find((turn) => turn.speaker === 'user');
+      if (!nextUser) {
+        return null;
+      }
+      const acknowledgement = acknowledgementRegex.test(nextUser.text);
+      const overlap = assistantTurn.words.filter((word) => word.length > 6 && nextUser.words.includes(word)).length;
+      const develops = nextUser.wordCount > 12 && nextUser.wordCount >= Math.min(assistantTurn.wordCount * 0.4, 18);
+      const positive = acknowledgement || overlap >= 2 || develops;
+      const minimal = !positive && nextUser.wordCount <= 6 && assistantTurn.wordCount > 25;
+      const weight = (acknowledgement ? 2 : 0) + overlap + (develops ? 3 : 0);
+      return {
+        assistant: assistantTurn,
+        user: nextUser,
+        acknowledgement,
+        overlap,
+        develops,
+        positive,
+        minimal,
+        weight,
+      };
+    })
+    .filter(Boolean);
 
-  const richnessBase = clamp((uniqueWords / Math.max(totalWords, 1)) * 15 + avgWordsPerBlock / 40);
-  const longPromptBonus = firstBlock.length > 180 ? 0.5 : 0;
-  const richnessScore = clamp(richnessBase + longPromptBonus);
-  const richnessComment =
-    richnessScore >= 4
-      ? 'Prompts riches, contextualisés et nuancés.'
-      : richnessScore >= 3
-      ? 'Bonne base ; ajouter davantage de contexte ou de contraintes.'
-      : 'Prompts trop courts ou génériques ; détailler le contexte et les attentes.';
+  const reactionPositive = reactionPairs.filter((pair) => pair.positive).sort((a, b) => b.weight - a.weight);
+  const reactionMinimal = reactionPairs.filter((pair) => pair.minimal);
 
-  const delegationKeywords = ['analyse', 'évalue', 'structure', 'diagnostic', 'modélise', 'raisonne', 'compare', 'critique'];
-  const executionKeywords = ['résume', 'résumer', 'résumé', 'liste', 'trier', 'copie', 'transcrire'];
-  const delegationScore = clamp(keywordCount(cleaned, delegationKeywords) * 0.9 + (questions > 4 ? 1 : 0) - executionKeywords.length * 0.1);
-  const delegationComment =
-    delegationScore >= 4
-      ? 'L’IA est sollicitée comme coéquipier cognitif.'
-      : delegationScore >= 3
-      ? 'Usage hybride ; continuer à pousser l’IA sur des tâches de raisonnement.'
-      : 'Usage principalement exécutif ; confier des analyses plus complexes à l’IA.';
+  const reactionScore = clamp(1 + reactionPositive.length * 1.2 - reactionMinimal.length * 0.9);
+  const reactionComment = `${reactionPositive.length} intégration${reactionPositive.length > 1 ? 's' : ''}, ${reactionMinimal.length} réponse${reactionMinimal.length > 1 ? 's' : ''} minimales.`;
+  const reactionExample = reactionPositive.length
+    ? `Suivi : « ${excerpt(reactionPositive[0].assistant.text, 70)} » → « ${excerpt(reactionPositive[0].user.text, 70)} ». `
+    : reactionMinimal.length
+    ? `Suggestion peu exploitée : « ${excerpt(reactionMinimal[0].assistant.text, 70)} » → « ${excerpt(reactionMinimal[0].user.text, 60)} ». `
+    : 'Peu de traces de validation ou d’application des idées proposées.';
+
+  const avgWordsPerPrompt = userTurns.length ? totalUserWords / userTurns.length : 0;
+  const lexicalVariety = totalUserWords ? uniqueUserWords / totalUserWords : 0;
+  let richnessScore = clamp((avgWordsPerPrompt / 25) * 3 + lexicalVariety * 2);
+  if (avgWordsPerPrompt < 8) {
+    richnessScore = Math.min(richnessScore, 1.8 + avgWordsPerPrompt * 0.3);
+  }
+  const richnessComment = `Prompts moyens : ${avgWordsPerPrompt.toFixed(1)} mots, variété ${Math.round(lexicalVariety * 100)} %.`;
+  const longestPrompt = userTurns.reduce((prev, curr) => (curr.wordCount > (prev?.wordCount || 0) ? curr : prev), null);
+  const richnessExample = longestPrompt
+    ? `Prompt le plus développé (${longestPrompt.wordCount} mots) : « ${excerpt(longestPrompt.text, 160)} »`
+    : 'Aucun prompt utilisateur détecté.';
+
+  const cognitiveVerbs = ['analyse', 'analyser', 'évalue', 'évaluer', 'diagnostique', 'diagnostiquer', 'structure', 'structurer', 'priorise', 'prioriser', 'hiérarchise', 'argumente', 'argumenter', 'quantifie', 'planifie', 'projette', 'compare', 'comparer', 'critique', 'synthétise', 'élabore'];
+  const executionVerbs = ['résume', 'résumer', 'résumé', 'liste', 'lister', 'trie', 'trier', 'copie', 'transcrit', 'reformule'];
+  const cognitiveHits = userTurns.reduce(
+    (count, turn) => count + cognitiveVerbs.filter((verb) => turn.text.toLowerCase().includes(verb)).length,
+    0
+  );
+  const executionHits = userTurns.reduce(
+    (count, turn) => count + executionVerbs.filter((verb) => turn.text.toLowerCase().includes(verb)).length,
+    0
+  );
+  const delegationScore = clamp(1 + cognitiveHits * 0.9 + Math.min(totalQuestions, 5) * 0.2 - executionHits * 0.6);
+  const delegationComment = `${cognitiveHits} requête${cognitiveHits > 1 ? 's' : ''} cognitives vs ${executionHits} demande${executionHits > 1 ? 's' : ''} d’exécution.`;
+  const delegationExample = (() => {
+    if (cognitiveHits > 0) {
+      const turn = userTurns.find((t) => cognitiveVerbs.some((verb) => t.text.toLowerCase().includes(verb)));
+      if (turn) {
+        return `Exemple cognitif : « ${excerpt(turn.text, 160)} »`;
+      }
+    }
+    if (executionHits > 0) {
+      const turn = userTurns.find((t) => executionVerbs.some((verb) => t.text.toLowerCase().includes(verb)));
+      if (turn) {
+        return `Demande surtout exécutive : « ${excerpt(turn.text, 160)} »`;
+      }
+    }
+    return 'Aucune instruction marquante détectée.';
+  })();
 
   const categories = {
     clarity: {
       label: "Clarté de l’intention",
       score: clarityScore,
       comment: clarityComment,
+      example: clarityExample,
     },
     dialogue: {
       label: 'Qualité du dialogue',
       score: dialogueScore,
       comment: dialogueComment,
+      example: dialogueExample,
     },
     advice: {
       label: 'Conseils & angles',
       score: adviceScore,
       comment: adviceComment,
+      example: adviceExample,
     },
     reaction: {
       label: 'Réaction aux suggestions',
       score: reactionScore,
       comment: reactionComment,
+      example: reactionExample,
     },
     richness: {
       label: 'Richesse des requêtes',
       score: richnessScore,
       comment: richnessComment,
+      example: richnessExample,
     },
     delegation: {
       label: 'Niveau de délégation',
       score: delegationScore,
       comment: delegationComment,
+      example: delegationExample,
     },
   };
 
   const overall = clamp(
-    (clarityScore + dialogueScore + adviceScore + reactionScore + richnessScore + delegationScore) / 6,
+    (categories.clarity.score +
+      categories.dialogue.score +
+      categories.advice.score +
+      categories.reaction.score +
+      categories.richness.score +
+      categories.delegation.score) /
+      6,
     0,
     5
   );
@@ -165,24 +404,20 @@ const evaluateTranscript = (transcript) => {
     .map((item) => `${item.label} — ${item.comment}`);
 
   const tips = [];
-  if (clarityScore < 4) tips.push('Commencer vos échanges par une formulation explicite du livrable attendu et des contraintes.');
-  if (dialogueScore < 4) tips.push('Favoriser les relances ciblées : “propose-moi un autre angle”, “que se passe-t-il si…”.');
-  if (adviceScore < 4) tips.push('Explorer plusieurs alternatives et demander des comparaisons chiffrées ou argumentées.');
-  if (reactionScore < 4) tips.push("Valider ou écarter explicitement les pistes données par l'IA et expliquer vos choix.");
-  if (richnessScore < 4) tips.push('Préparer vos prompts en listant contexte, contraintes, format attendu avant de solliciter l’IA.');
-  if (delegationScore < 4) tips.push('Confier des tâches analytiques à l’IA (diagnostics, matrices de décision) plutôt que de simples résumés.');
+  if (categories.clarity.score < 4) tips.push('Commencer vos échanges par une formulation explicite du livrable attendu et des contraintes.');
+  if (categories.dialogue.score < 4) tips.push('Multiplier les relances ciblées : “propose un autre angle”, “que se passe-t-il si…”.');
+  if (categories.advice.score < 4) tips.push('Explorer plusieurs alternatives et demander des comparaisons argumentées.');
+  if (categories.reaction.score < 4) tips.push("Valider ou écarter explicitement les pistes données par l'IA et expliquer vos choix.");
+  if (categories.richness.score < 4) tips.push('Préparer vos prompts en listant contexte, contraintes, format attendu avant de solliciter l’IA.');
+  if (categories.delegation.score < 4) tips.push('Confier des tâches analytiques à l’IA (diagnostics, matrices de décision) plutôt que de simples résumés.');
 
   return {
     metrics: {
-      totalWords,
-      uniqueWords,
       totalTurns,
-      avgWordsPerBlock,
-      questions,
-      extractedKeywords: {
-        advice: adviceCount,
-        reaction: reactionCount,
-      },
+      totalUserWords,
+      uniqueUserWords,
+      totalQuestions,
+      avgWordsPerPrompt,
     },
     scores: categories,
     overall,

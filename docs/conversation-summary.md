@@ -52,10 +52,10 @@ Ce document récapitule les étapes majeures échangées avec Codex pendant la m
 ## Phase 7 · Analyse collaboration humain–IA
 - Nouvelle étape front pour coller le transcript complet du dialogue avec l’IA et déclencher une analyse critique.
 - Création de `netlify/functions/analyze-collaboration.js` : heuristiques 0–5 sur 6 critères, archivage des conversations, export Google Sheets.
-- Affichage d’un tableau des scores, listes de points forts/faiblesses et intégration du diagnostic dans le PDF téléchargeable.
+- Affichage d’un tableau des scores, listes de points forts/faiblesses, extraits concrets (exemples) et intégration du diagnostic dans le PDF téléchargeable.
+- Raffinement des heuristiques : parsing “You said / ChatGPT said”, distinction demandes d’exécution vs conseils, détection de reprises de suggestions, mesure de la richesse lexicale, exemples nettoyés.
 
 ## Points en suspens / évolutions envisagées
 - Intégration du plan réel (`public/documents/plan.pdf`).
 - Ajustements des seuils de similarité selon les exigences métier.
 - Intégration potentielle d’une IA externe pour affiner l’analyse de collaboration.
-

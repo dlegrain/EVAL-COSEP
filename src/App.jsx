@@ -164,30 +164,93 @@ export default function App() {
     }
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
     const marginX = 48;
-    let cursorY = 60;
+    const headerHeight = 88;
 
-    doc.setFontSize(18);
-    doc.text('Rapport d’évaluation EVAL COSEP', marginX, cursorY);
-    cursorY += 28;
-
+    doc.setFillColor(16, 47, 93);
+    doc.rect(0, 0, pageWidth, headerHeight, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.text('EVAL COSEP — Rapport d’évaluation', marginX, 40);
     doc.setFontSize(12);
-    doc.text(`Participant : ${participantLabel || 'Non renseigné'}`, marginX, cursorY);
-    cursorY += 18;
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Participant : ${participantLabel || 'Non renseigné'}`, marginX, 60);
     doc.text(
       `Soumission : ${
         analysis.elapsed?.submittedAt ? new Date(analysis.elapsed.submittedAt).toLocaleString() : new Date().toLocaleString()
       }`,
       marginX,
-      cursorY
+      76
     );
-    cursorY += 18;
-    doc.text(`Score global : ${(analysis.score ?? 0).toFixed(1)} %`, marginX, cursorY);
-    cursorY += 18;
-    doc.text(`Temps écoulé : ${analysis.elapsed?.formatted ?? formattedElapsed}`, marginX, cursorY);
-    cursorY += 28;
 
-    const details = analysis.details?.length
+    doc.setTextColor(33, 37, 41);
+    let cursorY = headerHeight + 28;
+
+    const statCards = [
+      {
+        title: 'Score extraction',
+        value: `${(analysis.score ?? 0).toFixed(1)}%`,
+        subtitle: 'Conformité référentiel',
+        color: [0, 88, 255],
+      },
+      {
+        title: 'Temps écoulé',
+        value: analysis.elapsed?.formatted ?? formattedElapsed,
+        subtitle: hasExceededTime ? 'Hors délai' : 'Durée de l’exercice',
+        color: [37, 51, 74],
+      },
+    ];
+
+    if (collaboration) {
+      statCards.push({
+        title: 'Score collaboration',
+        value: `${(collaboration.overall ?? 0).toFixed(1)}/5`,
+        subtitle: 'Qualité humain–IA',
+        color: [23, 125, 91],
+      });
+    }
+
+    const cardWidth = 170;
+    const cardHeight = 86;
+    const cardGap = 18;
+
+    const drawStatCard = (x, y, { title, value, subtitle, color }) => {
+      doc.setFillColor(...color, 20);
+      doc.setDrawColor(color[0], color[1], color[2]);
+      doc.roundedRect(x, y, cardWidth, cardHeight, 12, 12, 'FD');
+      doc.setTextColor(color[0], color[1], color[2]);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text(title, x + 16, y + 24);
+      doc.setFontSize(26);
+      doc.text(value, x + 16, y + 54);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(subtitle, x + 16, y + 72);
+      doc.setTextColor(33, 37, 41);
+    };
+
+    statCards.forEach((card, index) => {
+      const x = marginX + index * (cardWidth + cardGap);
+      drawStatCard(x, cursorY, card);
+    });
+
+    cursorY += cardHeight + 36;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Analyse extraction', marginX, cursorY);
+    cursorY += 20;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(90, 99, 122);
+    doc.text('Comparaison des réponses fournies avec le référentiel validé.', marginX, cursorY);
+    doc.setTextColor(33, 37, 41);
+    cursorY += 18;
+
+    const extractionRows = analysis.details?.length
       ? analysis.details.map((detail) => [
           detail.section,
           detail.score !== undefined ? `${detail.score}%` : 'N/A',
@@ -198,9 +261,17 @@ export default function App() {
     doc.autoTable({
       startY: cursorY,
       head: [['Section', 'Score', 'Commentaire']],
-      body: details,
-      headStyles: { fillColor: [0, 88, 255], textColor: 255 },
-      styles: { fontSize: 10, cellPadding: 6 },
+      body: extractionRows,
+      theme: 'striped',
+      headStyles: { fillColor: [0, 88, 255], textColor: 255, fontStyle: 'bold' },
+      styles: {
+        fontSize: 10,
+        cellPadding: 6,
+        textColor: [33, 37, 41],
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: [246, 249, 255] },
       columnStyles: {
         0: { cellWidth: 200 },
         1: { cellWidth: 70, halign: 'center' },
@@ -208,12 +279,14 @@ export default function App() {
       },
     });
 
-    cursorY = doc.lastAutoTable.finalY + 20;
+    cursorY = doc.lastAutoTable.finalY + 18;
 
     if (analysis.storage || analysis.sheet) {
+      doc.setFont('helvetica', 'bold');
       doc.setFontSize(12);
-      doc.text('Traçabilité :', marginX, cursorY);
+      doc.text('Traçabilité', marginX, cursorY);
       cursorY += 16;
+      doc.setFont('helvetica', 'normal');
       if (analysis.storage) {
         doc.text(
           `• Archivage du fichier : ${analysis.storage.location ?? analysis.storage.message ?? 'Information indisponible'}`,
@@ -224,47 +297,62 @@ export default function App() {
       }
       if (analysis.sheet) {
         doc.text(
-          `• Archivage Google Sheets : ${
-            analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')
-          }`,
+          `• Google Sheets : ${analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')}`,
           marginX,
           cursorY
         );
         cursorY += 14;
       }
-      cursorY += 10;
+      cursorY += 12;
     }
 
     if (collaboration) {
-      if (cursorY > 620) {
+      if (cursorY > 660) {
         doc.addPage();
-        cursorY = 60;
+        cursorY = 72;
       }
 
+      doc.setFont('helvetica', 'bold');
       doc.setFontSize(16);
       doc.text('Analyse collaboration humain–IA', marginX, cursorY);
-      cursorY += 24;
+      cursorY += 20;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(90, 99, 122);
+      doc.text('Évaluation de la qualité du dialogue et de l’exploitation des suggestions IA.', marginX, cursorY);
+      doc.setTextColor(33, 37, 41);
+      cursorY += 18;
 
-      const collabRows = Object.entries(collaboration.scores || {}).map(([key, value]) => [
-        key,
+      const collabRows = Object.values(collaboration.scores || {}).map((value) => [
+        value.label || '-',
         `${value.score.toFixed(1)}/5`,
         value.comment,
+        value.example || '',
       ]);
 
       if (collabRows.length) {
         doc.autoTable({
           startY: cursorY,
-          head: [['Critère', 'Score', 'Commentaire']],
+          head: [['Critère', 'Score', 'Commentaire', 'Exemple']],
           body: collabRows,
-          headStyles: { fillColor: [29, 42, 74], textColor: 255 },
-          styles: { fontSize: 10, cellPadding: 6 },
+          theme: 'striped',
+          headStyles: { fillColor: [29, 42, 74], textColor: 255, fontStyle: 'bold' },
+          styles: {
+            fontSize: 10,
+            cellPadding: 6,
+            textColor: [33, 37, 41],
+            lineColor: [226, 232, 240],
+            lineWidth: 0.2,
+          },
+          alternateRowStyles: { fillColor: [246, 248, 255] },
           columnStyles: {
-            0: { cellWidth: 160 },
-            1: { cellWidth: 70, halign: 'center' },
-            2: { cellWidth: 260 },
+            0: { cellWidth: 150 },
+            1: { cellWidth: 60, halign: 'center' },
+            2: { cellWidth: 170 },
+            3: { cellWidth: 140 },
           },
         });
-        cursorY = doc.lastAutoTable.finalY + 20;
+        cursorY = doc.lastAutoTable.finalY + 18;
       }
 
       const advice = collaboration.advice || {};
@@ -274,11 +362,13 @@ export default function App() {
         }
         if (cursorY > 720) {
           doc.addPage();
-          cursorY = 60;
+          cursorY = 72;
         }
+        doc.setFont('helvetica', 'bold');
         doc.setFontSize(12);
         doc.text(title, marginX, cursorY);
         cursorY += 16;
+        doc.setFont('helvetica', 'normal');
         items.forEach((item) => {
           doc.text(`• ${item}`, marginX, cursorY);
           cursorY += 14;
@@ -288,11 +378,11 @@ export default function App() {
 
       listSection('Points forts', advice.strengths);
       listSection('Axes d’amélioration', advice.improvements);
-      listSection('Recommandations', advice.tips);
+      listSection('Conseils personnalisés', advice.tips);
     }
 
     const safeName = participantLabel.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'participant';
-    doc.save(`rapport-eval-cosep-${safeName}.pdf`);
+    doc.save(`eval-cosep-${safeName}.pdf`);
   };
 
   const handleCollaborationSubmit = async (event) => {
@@ -337,6 +427,49 @@ export default function App() {
       console.error(error);
       setCollabStatus('error');
       setCollabError(error.message || "Analyse collaboration impossible pour le moment.");
+    }
+  };
+
+  const handleCollabPaste = (event) => {
+    const { clipboardData } = event;
+    if (!clipboardData) {
+      return;
+    }
+
+    const html = clipboardData.getData('text/html');
+    if (!html) {
+      return;
+    }
+
+    event.preventDefault();
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      doc.querySelectorAll('script,style,button').forEach((node) => node.remove());
+      const text = doc.body.innerText
+        .replace(/\u00a0/g, ' ')
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      if (!text) {
+        return;
+      }
+
+      setCollabText((prev) => {
+        const prefix = prev.trim().length > 0 ? `${prev.trimEnd()}\n\n` : '';
+        return `${prefix}${text}`;
+      });
+      setCollabError('');
+    } catch (error) {
+      console.warn('Impossible de parser le contenu HTML du presse-papiers', error);
+      const plain = clipboardData.getData('text/plain');
+      if (plain) {
+        setCollabText((prev) => {
+          const prefix = prev.trim().length > 0 ? `${prev.trimEnd()}\n\n` : '';
+          return `${prefix}${plain}`;
+        });
+      }
     }
   };
 
@@ -491,9 +624,6 @@ export default function App() {
                 Archivage Google Sheets : {analysis.sheet.message ?? (analysis.sheet.success ? 'Enregistré.' : 'Non enregistré.')}
               </p>
             )}
-            <button type="button" className="primary download" onClick={handleDownloadPdf}>
-              Télécharger le rapport PDF
-            </button>
           </div>
         </div>
       )}
@@ -509,6 +639,7 @@ export default function App() {
             <textarea
               value={collabText}
               onChange={(event) => setCollabText(event.target.value)}
+              onPaste={handleCollabPaste}
               placeholder="Collez ici votre conversation complète, dans l’ordre chronologique."
               rows={14}
             />
@@ -548,7 +679,10 @@ export default function App() {
                   <div key={key} className="collab-row">
                     <span className="collab-criterion">{value.label || key}</span>
                     <span className="collab-score">{value.score.toFixed(1)}</span>
-                    <span className="collab-comment">{value.comment}</span>
+                    <span className="collab-comment">
+                      {value.comment}
+                      {value.example && <span className="collab-example">{value.example}</span>}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -589,6 +723,9 @@ export default function App() {
               </div>
             </div>
           )}
+          <button type="button" className="primary download" onClick={handleDownloadPdf}>
+            Télécharger l’évaluation (PDF)
+          </button>
         </div>
       )}
     </div>
