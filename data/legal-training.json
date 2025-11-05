@@ -1,0 +1,41 @@
+{
+  "Q1": {
+    "label": "Objectif et champ d'application (AR 7 avril 2023)",
+    "question": "Selon l'Arrêté royal fixant une formation de base en sécurité concernant les chantiers temporaires ou mobiles, quel est l'objectif principal visé par cette formation pour les travailleurs et quel est l'engagement de l'entrepreneur à cet égard ?",
+    "expected": {
+      "bullets": [
+        "Sensibiliser les travailleurs aux risques présents sur un chantier temporaire ou mobile",
+        "Couvrir les risques provenant de leur propre activité et de celles d'autres entrepreneurs présents",
+        "L'entrepreneur doit pouvoir démontrer que la formation suivie répond aux objectifs visés"
+      ]
+    }
+  },
+  "Q2": {
+    "label": "Contenu et durée minimales (CP 124)",
+    "question": "Quelle est la durée minimale de la formation de base en sécurité dans le secteur de la construction (CP 124), et citez deux des cinq objectifs minimums que doit viser la formation ?",
+    "expected": {
+      "duration": 8,
+      "objectives": [
+        "Connaissance de base du rôle et des tâches des acteurs des chantiers temporaires ou mobiles",
+        "Connaissance de base de l'organisation d'une collaboration efficace sur le chantier pour la sécurité et la santé",
+        "Connaissance de base des principes généraux de prévention (article 5 de la loi)",
+        "Connaissance de l'application des mesures de prévention adéquates",
+        "Comprendre et appliquer un comportement sûr et sain sur un chantier temporaire ou mobile"
+      ]
+    }
+  },
+  "Q3": {
+    "label": "Équivalences et dispenses (CCT et AR)",
+    "question": "Citez au moins deux conditions différentes permettant d'être réputé avoir satisfait à l'obligation de suivre la formation de base en sécurité (sans l'avoir suivie chez l'entrepreneur).",
+    "expected": {
+      "conditions": [
+        "Attestation VCA en cours de validité",
+        "Au moins cinq ans d'expérience sur chantier temporaire ou mobile dans les dix dernières années (AR 7 avril 2023) ou dans le secteur de la construction dans les quinze dernières années (CCT 12 mai 2022)",
+        "Attestation d'une autre formation démontrant les connaissances requises",
+        "Attestation délivrée ou validée par Constructiv montrant que la formation de base répond aux conditions",
+        "Formation à la sécurité 'construction' validée par Constructiv"
+      ]
+    }
+  }
+}
+

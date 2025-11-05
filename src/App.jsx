@@ -60,6 +60,15 @@ export default function App() {
   const [collabStatus, setCollabStatus] = useState('idle');
   const [collabError, setCollabError] = useState('');
   const [collaboration, setCollaboration] = useState(null);
+  // Module 3: Législation
+  const [legalQ1, setLegalQ1] = useState('');
+  const [legalQ2, setLegalQ2] = useState('');
+  const [legalQ3, setLegalQ3] = useState('');
+  const [legalStatus, setLegalStatus] = useState('idle'); // idle | working | success | error
+  const [legalError, setLegalError] = useState('');
+  const [legalResult, setLegalResult] = useState(null);
+  const [legalStart, setLegalStart] = useState(null);
+  const [legalElapsed, setLegalElapsed] = useState(0);
 
   useEffect(() => {
     if (!startTime) {
@@ -72,6 +81,15 @@ export default function App() {
 
     return () => clearInterval(intervalId);
   }, [startTime]);
+
+  // Chrono module 3 (10 min)
+  useEffect(() => {
+    if (!legalStart) return;
+    const id = setInterval(() => {
+      setLegalElapsed(Date.now() - legalStart);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [legalStart]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.firstName, firstName);
@@ -188,30 +206,27 @@ export default function App() {
     doc.setTextColor(33, 37, 41);
     let cursorY = headerHeight + 28;
 
+    const overallPct = Math.round((collaboration?.overall ?? 0) * 20);
     const statCards = [
       {
-        title: 'Score extraction',
+        title: 'Module 1 — Extraction',
         value: `${(analysis.score ?? 0).toFixed(1)}%`,
-        subtitle: 'Conformité référentiel',
+        subtitle: 'Conformité au référentiel',
         color: [0, 88, 255],
       },
       {
-        title: 'Temps écoulé',
-        value: analysis.elapsed?.formatted ?? formattedElapsed,
-        subtitle: hasExceededTime ? 'Hors délai' : 'Durée de l’exercice',
-        color: [37, 51, 74],
-      },
-    ];
-
-    if (collaboration) {
-      const overallPct = Math.round((collaboration.overall ?? 0) * 20);
-      statCards.push({
-        title: 'Score collaboration',
-        value: `${overallPct}% (${(collaboration.overall ?? 0).toFixed(1)}/5)`,
+        title: 'Module 2 — Collaboration',
+        value: `${overallPct}%`,
         subtitle: 'Qualité humain–IA',
         color: [23, 125, 91],
-      });
-    }
+      },
+      {
+        title: 'Module 3 — Législation',
+        value: `${(legalResult?.score ?? 0).toFixed(1)}%`,
+        subtitle: 'Recherche + interprétation',
+        color: [0, 118, 255],
+      },
+    ];
 
     const cardWidth = 170;
     const cardHeight = 86;
@@ -241,7 +256,18 @@ export default function App() {
       drawStatCard(x, cursorY, card);
     });
 
-    cursorY += cardHeight + 36;
+    cursorY += cardHeight + 22;
+
+    // Afficher la durée de l'exercice sous les encadrés des scores
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(90, 99, 122);
+    doc.text(
+      `Durée de l’exercice: ${analysis.elapsed?.formatted ?? formattedElapsed}${hasExceededTime ? ' (hors délai)' : ''}`,
+      marginX,
+      cursorY
+    );
+    cursorY += 18;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
@@ -404,6 +430,46 @@ export default function App() {
       listSection('Conseils personnalisés', advice.tips);
     }
 
+    // Module 3 — Législation
+    if (legalResult) {
+      if (cursorY > 660) {
+        doc.addPage();
+        cursorY = 72;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('Module 3 — Législation (recherche et interprétation)', marginX, cursorY);
+      cursorY += 20;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(90, 99, 122);
+      doc.text('Trois réponses libres évaluées sur la conformité de sens aux exigences réglementaires.', marginX, cursorY);
+      doc.setTextColor(33, 37, 41);
+      cursorY += 18;
+
+      const legalRows = (legalResult.details || []).map((d) => [
+        d.questionId,
+        `${d.score}%`,
+        d.comment
+      ]);
+
+      doc.autoTable({
+        startY: cursorY,
+        head: [['Question', 'Score', 'Commentaire']],
+        body: legalRows,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 118, 255], textColor: 255, fontStyle: 'bold' },
+        styles: { fontSize: 10, cellPadding: 6, textColor: [33,37,41], lineColor: [226,232,240], lineWidth: 0.2, overflow: 'linebreak' },
+        alternateRowStyles: { fillColor: [246, 249, 255] },
+        columnStyles: {
+          0: { cellWidth: 90 },
+          1: { cellWidth: 60, halign: 'center' },
+          2: { cellWidth: 350, overflow: 'linebreak', valign: 'top' }
+        }
+      });
+      cursorY = doc.lastAutoTable.finalY + 18;
+    }
+
     const safeName = participantLabel.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'participant';
     doc.save(`eval-cosep-${safeName}.pdf`);
   };
@@ -511,7 +577,8 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const progressPct = collaboration ? 100 : analysis ? 50 : 0;
+  const modulesDone = (analysis ? 1 : 0) + (legalResult ? 1 : 0) + (collaboration ? 1 : 0);
+  const progressPct = Math.round((modulesDone / 3) * 100);
 
   return (
     <div className="layout">
@@ -530,7 +597,7 @@ export default function App() {
 
       {phase === 'identify' && (
         <div className="card">
-          <h2 id="task-1">1. Identifiez-vous pour démarrer</h2>
+          <h2 id="task-1">Identifiez-vous pour démarrer</h2>
           <p className="status">Le chronomètre commencera dès que vous accéderez aux documents.</p>
           <div className="form-row">
             <label>
@@ -550,7 +617,7 @@ export default function App() {
 
       {phase !== 'identify' && (
         <div className="card">
-          <h2 id="task-2">2. Mission et documents</h2>
+          <h2 id="task-2">Mission et documents</h2>
           <p>
             Vous disposez de 30 minutes à partir du téléchargement des documents. Ce délai peut être dépassé, mais
             il sera enregistré dans l’analyse finale.
@@ -582,7 +649,7 @@ export default function App() {
 
       {phase !== 'identify' && (
         <div className="card">
-          <h2 id="task-3">3. Déposez votre fichier Excel d’analyse</h2>
+          <h2 id="task-3">Déposez votre fichier Excel d’analyse</h2>
           <form onSubmit={handleSubmit}>
             <div className="upload-zone">
               <p>Glissez votre fichier Excel ici ou utilisez le sélecteur ci-dessous.</p>
@@ -601,7 +668,7 @@ export default function App() {
 
       {analysis && (
         <div className="card">
-          <h2 id="task-4">4. Résultat de l’analyse</h2>
+          <h2 id="task-4">Module 1 — Résultat de l’extraction</h2>
           <div className="results">
             <div className="results-header">
               <div>
@@ -654,12 +721,15 @@ export default function App() {
               </p>
             )}
           </div>
+          <button type="button" className="primary download" onClick={handleDownloadPdf}>
+            Télécharger l’évaluation (PDF)
+          </button>
         </div>
       )}
 
       {analysis && (
         <div className="card">
-          <h2 id="task-5">5. Analyse de la collaboration humain–IA</h2>
+          <h2 id="task-5">Module 2 — Collaboration humain–IA</h2>
           <p>
             Collez ci-dessous l’intégralité de votre échange avec l’IA (ChatGPT, Gemini, etc.). Le système analyse la qualité de
             la collaboration et vous fournit un diagnostic critique.
@@ -752,9 +822,96 @@ export default function App() {
               </div>
             </div>
           )}
-          <button type="button" className="primary download" onClick={handleDownloadPdf}>
-            Télécharger l’évaluation (PDF)
-          </button>
+          <button type="button" className="primary download" onClick={handleDownloadPdf}>Télécharger l’évaluation (PDF)</button>
+        </div>
+      )}
+
+      {/* Module 3 — Législation */}
+      {phase !== 'identify' && (
+        <div className="card">
+          <h2 id="task-6">Module 3 — Législation: formation sécurité (10 min)</h2>
+          <div className="info-box">
+            <h4>Contexte et consignes</h4>
+            <p className="muted">
+              Vous devez rechercher et interpréter correctement la réglementation relative à la formation de base en sécurité sur les
+              chantiers temporaires ou mobiles (Arrêté royal du 7 avril 2023, secteur construction CP 124, CCT et attestations Constructiv/VCA).
+              Utilisez une IA et le web si nécessaire. Vous avez 10 minutes pour répondre aux 3 questions ci‑dessous.
+              L’évaluation porte sur l’exactitude du sens, pas sur les mots exacts.
+            </p>
+          </div>
+          <div className="timer">Temps écoulé: {formatDuration(legalElapsed)} {legalStart ? '' : '(cliquez sur Démarrer)'} </div>
+          <div className="pad-top">
+            <button className="secondary" type="button" onClick={() => { setLegalStart(Date.now()); setLegalElapsed(0); }} disabled={!!legalStart}>
+              Démarrer le module (10:00)
+            </button>
+          </div>
+          <div className="pad-top">
+            <label>
+              Q1 — Objectif et champ d'application (AR 7 avril 2023)
+              <span className="muted"> — But de la formation, risques couverts (propres et d’autres entrepreneurs), démontrabilité par l’entrepreneur.</span>
+              <textarea rows={5} value={legalQ1} onChange={(e) => setLegalQ1(e.target.value)} placeholder="Votre réponse libre" />
+            </label>
+          </div>
+          <div className="pad-top">
+            <label>
+              Q2 — Contenu et durée minimales (CP 124)
+              <span className="muted"> — Durée minimale 8h; citez deux objectifs parmi acteurs, collaboration, principes généraux de prévention, mesures de prévention, comportement sûr.</span>
+              <textarea rows={5} value={legalQ2} onChange={(e) => setLegalQ2(e.target.value)} placeholder="Votre réponse libre" />
+            </label>
+          </div>
+          <div className="pad-top">
+            <label>
+              Q3 — Équivalences et dispenses (CCT + AR)
+              <span className="muted"> — Citez au moins deux conditions valides (ex: VCA, 5 ans d’expérience selon AR/CCT, autre formation équivalente, attestation Constructiv, formation sécurité Constructiv).</span>
+              <textarea rows={5} value={legalQ3} onChange={(e) => setLegalQ3(e.target.value)} placeholder="Votre réponse libre" />
+            </label>
+          </div>
+          <div className="pad-top">
+            <button className="primary" type="button" disabled={legalStatus==='working'} onClick={async () => {
+              setLegalStatus('working'); setLegalError('');
+              try {
+                const payload = {
+                  answers: { Q1: legalQ1, Q2: legalQ2, Q3: legalQ3 },
+                  startedAt: legalStart,
+                  submittedAt: Date.now(),
+                  elapsedMs: legalStart ? Date.now() - legalStart : 0
+                };
+                const res = await fetch('/.netlify/functions/evaluate-legal-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!res.ok) throw new Error(await res.text());
+                const json = await res.json();
+                setLegalResult(json);
+                setLegalStatus('success');
+              } catch (err) {
+                setLegalError(err.message || 'Erreur pendant l\'évaluation.');
+                setLegalStatus('error');
+              }
+            }}>
+              {legalStatus==='working' ? 'Évaluation en cours…' : 'Soumettre le module'}
+            </button>
+          </div>
+          {legalError && <div className="error">{legalError}</div>}
+
+          {legalResult && (
+            <div className="results pad-top">
+              <div className="results-header">
+                <div>
+                  <p className="participant">Score module 3</p>
+                  <p className="timestamp">{(legalResult.score ?? 0).toFixed(1)}%</p>
+                </div>
+              </div>
+              <div className="details-table">
+                <div className="details-header"><span>Question</span><span>Score</span><span>Commentaire</span></div>
+                {legalResult.details?.map((d) => (
+                  <div key={d.questionId} className="details-row">
+                    <span className="details-section">{d.questionId}</span>
+                    <span className="details-score">{d.score}%</span>
+                    <span className="details-comment">{d.comment}</span>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="primary download" onClick={handleDownloadPdf}>Télécharger l’évaluation (PDF)</button>
+            </div>
+          )}
         </div>
       )}
       </main>

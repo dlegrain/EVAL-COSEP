@@ -276,6 +276,23 @@ button.secondary {
   font-weight: 600;
 }
 
+.info-box {
+  background: #eef5ff;
+  border: 1px solid #cfe1ff;
+  color: #1d2a4a;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+}
+
+.info-box h4 {
+  margin: 0 0 0.35rem;
+}
+
+.muted {
+  color: #5c6a86;
+  font-size: 0.92rem;
+}
+
 .note-lock {
   margin-top: 0.75rem;
   font-weight: 600;
