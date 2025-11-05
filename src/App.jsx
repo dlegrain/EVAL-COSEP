@@ -191,6 +191,14 @@ export default function App() {
 
   const currentModuleData = modules.find(m => m.id === currentModule);
 
+  // Handler de réinitialisation
+  const handleReset = () => {
+    if (confirm('Êtes-vous sûr de vouloir réinitialiser ? Toutes les données seront effacées.')) {
+      localStorage.clear();
+      window.location.reload();
+    }
+  };
+
   // Handlers Module 1
   const handleFileChange = (event) => {
     setFile(event.target.files?.[0] || null);
@@ -328,6 +336,8 @@ export default function App() {
     setLegalError('');
     try {
       const payload = {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         answers: { Q1: legalQ1, Q2: legalQ2, Q3: legalQ3 },
         startedAt: module3StartTime,
         submittedAt: Date.now(),
@@ -600,11 +610,16 @@ export default function App() {
           <div className="card">
             <h1>EVAL COSEP — Modules</h1>
             <p className="participant-name">Participant: {participantLabel}</p>
-            {hasAnyResult && (
-              <button type="button" className="primary download-main" onClick={handleDownloadPdf}>
-                Télécharger le rapport d'évaluation (PDF)
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+              {hasAnyResult && (
+                <button type="button" className="primary download-main" onClick={handleDownloadPdf}>
+                  Télécharger le rapport d'évaluation (PDF)
+                </button>
+              )}
+              <button type="button" className="secondary" onClick={handleReset}>
+                Réinitialiser l'évaluation
               </button>
-            )}
+            </div>
           </div>
 
           <div className="modules-grid">

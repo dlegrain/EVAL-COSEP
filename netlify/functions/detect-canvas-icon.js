@@ -1,10 +1,60 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getStore } from '@netlify/blobs';
+import { google } from 'googleapis';
 
 const parseJson = (text) => {
   const m = String(text || '').match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
+};
+
+const appendToGoogleSheet = async ({ firstName, lastName, canvasDetected, confidence, evidence, submittedAt }) => {
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY?.replace(/\\n/g, '\n');
+  const sheetId = process.env.GOOGLE_SHEETS_ID;
+
+  if (!clientEmail || !privateKey || !sheetId) {
+    return {
+      success: false,
+      message: 'Variables Google Sheets manquantes. Résultat non archivé côté Google.',
+    };
+  }
+
+  try {
+    const auth = new google.auth.JWT({
+      email: clientEmail,
+      key: privateKey,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: 'Module4!A:F',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [
+          [
+            new Date(submittedAt).toISOString(),
+            firstName,
+            lastName,
+            canvasDetected ? 'OUI' : 'NON',
+            Math.round(confidence * 100) + '%',
+            evidence,
+          ],
+        ],
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Résultat archivé dans Google Sheets.',
+    };
+  } catch (error) {
+    console.error('Erreur Google Sheets:', error.message);
+    return { success: false, message: `Echec archivage Google Sheets: ${error.message}` };
+  }
 };
 
 export const handler = async (event) => {
@@ -63,9 +113,19 @@ Donne une réponse STRICTEMENT JSON en suivant ce schéma et rien d'autre:
       storage = { success: false, message: 'Archivage non disponible en local.' };
     }
 
+    // Archivage dans Google Sheets
+    const sheetResult = await appendToGoogleSheet({
+      firstName: firstName || '',
+      lastName: lastName || '',
+      canvasDetected,
+      confidence,
+      evidence,
+      submittedAt: Date.now(),
+    });
+
     return {
       statusCode: 200,
-      body: JSON.stringify({ canvasDetected, confidence, evidence, storage })
+      body: JSON.stringify({ canvasDetected, confidence, evidence, storage, sheet: sheetResult })
     };
   } catch (error) {
     console.error('Erreur detect-canvas-icon:', error);

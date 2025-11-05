@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { google } from 'googleapis';
 import legalData from '../../data/legal-training.json' assert { type: 'json' };
 
 const clamp = (n) => {
@@ -61,6 +62,59 @@ const parseJson = (text) => {
   try { return JSON.parse(m[0]); } catch { return null; }
 };
 
+const appendToGoogleSheet = async ({ firstName, lastName, elapsedMs, score, summary, submittedAt }) => {
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY?.replace(/\\n/g, '\n');
+  const sheetId = process.env.GOOGLE_SHEETS_ID;
+
+  if (!clientEmail || !privateKey || !sheetId) {
+    return {
+      success: false,
+      message: 'Variables Google Sheets manquantes. Résultat non archivé côté Google.',
+    };
+  }
+
+  try {
+    const auth = new google.auth.JWT({
+      email: clientEmail,
+      key: privateKey,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    const sheets = google.sheets({ version: 'v4', auth });
+    const durationMinutes = elapsedMs / 60000;
+    const formattedDuration = `${Math.floor(durationMinutes)} min ${(Math.round((durationMinutes % 1) * 60))
+      .toString()
+      .padStart(2, '0')} s`;
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: 'Module3!A:F',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [
+          [
+            new Date(submittedAt).toISOString(),
+            firstName,
+            lastName,
+            formattedDuration,
+            Number(score.toFixed(1)),
+            summary,
+          ],
+        ],
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Résultat archivé dans Google Sheets.',
+    };
+  } catch (error) {
+    console.error('Erreur Google Sheets:', error.message);
+    return { success: false, message: `Echec archivage Google Sheets: ${error.message}` };
+  }
+};
+
 export const handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Méthode non autorisée.' };
@@ -68,7 +122,7 @@ export const handler = async (event) => {
 
   try {
     const payload = JSON.parse(event.body || '{}');
-    const { answers, startedAt, submittedAt, elapsedMs } = payload;
+    const { firstName, lastName, answers, startedAt, submittedAt, elapsedMs } = payload;
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -122,6 +176,21 @@ export const handler = async (event) => {
 
     const overall = details.length ? details.reduce((s, d) => s + d.score, 0) / details.length : 0;
 
+    // Création du résumé pour Google Sheets
+    const summary = details
+      .map((d) => `${d.questionId}: ${d.score}% - ${d.comment}`)
+      .join(' | ');
+
+    // Archivage dans Google Sheets
+    const sheetResult = await appendToGoogleSheet({
+      firstName: firstName || '',
+      lastName: lastName || '',
+      elapsedMs,
+      score: overall,
+      summary,
+      submittedAt,
+    });
+
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -131,7 +200,8 @@ export const handler = async (event) => {
           startedAt,
           submittedAt
         },
-        details
+        details,
+        sheet: sheetResult
       })
     };
   } catch (error) {
