@@ -24,6 +24,7 @@
   },
   "homepage": "https://github.com/dlegrain/EVAL-COSEP#readme",
   "dependencies": {
+    "@google/generative-ai": "^0.21.0",
     "@netlify/blobs": "^6.3.0",
     "@netlify/functions": "^2.4.0",
     "googleapis": "^129.0.0",

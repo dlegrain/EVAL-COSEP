@@ -1,6 +1,7 @@
 import { getStore } from '@netlify/blobs';
 import { google } from 'googleapis';
 import xlsx from 'xlsx';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import referenceData from '../../data/reference.json' assert { type: 'json' };
 
 const referenceEntries = Object.entries(referenceData).map(([section, rawValue]) => {
@@ -11,57 +12,6 @@ const referenceEntries = Object.entries(referenceData).map(([section, rawValue])
 
   return { section, expected: rawValue ?? '', extras: {} };
 });
-
-const normalizeText = (input) => {
-  if (input === undefined || input === null) {
-    return '';
-  }
-  return String(input)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
-const levenshtein = (a, b) => {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-
-  const matrix = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
-
-  for (let i = 0; i <= a.length; i += 1) matrix[i][0] = i;
-  for (let j = 0; j <= b.length; j += 1) matrix[0][j] = j;
-
-  for (let i = 1; i <= a.length; i += 1) {
-    for (let j = 1; j <= b.length; j += 1) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
-      );
-    }
-  }
-
-  return matrix[a.length][b.length];
-};
-
-const similarityScore = (expected, received) => {
-  const normExpected = normalizeText(expected);
-  const normReceived = normalizeText(received);
-
-  if (!normExpected && !normReceived) return 100;
-  if (normExpected && !normReceived) return 0;
-  if (!normExpected && normReceived) return 40;
-
-  const distance = levenshtein(normExpected, normReceived);
-  const base = Math.max(normExpected.length, normReceived.length) || 1;
-  const ratio = 1 - distance / base;
-  return Math.max(0, Math.min(1, ratio)) * 100;
-};
 
 const parseUserWorkbook = (buffer) => {
   const workbook = xlsx.read(buffer, { type: 'buffer' });
@@ -85,7 +35,6 @@ const parseUserWorkbook = (buffer) => {
     if (!sectionLabel) continue;
     userEntries.push({
       section: sectionLabel,
-      normalizedSection: normalizeText(sectionLabel),
       value: rawValue ?? '',
       notes: rawNotes ?? '',
     });
@@ -94,92 +43,149 @@ const parseUserWorkbook = (buffer) => {
   return userEntries;
 };
 
-const buildComparison = (userEntries) => {
-  const issues = [];
-  let cumulatedScore = 0;
+const buildComparisonWithGemini = async (userEntries) => {
+  const apiKey = process.env.GEMINI_API_KEY;
 
-  const unmatchedUserEntries = new Set(userEntries.map((entry, index) => index));
-
-  referenceEntries.forEach(({ section, expected, extras }) => {
-    const normalizedTarget = normalizeText(section);
-    let bestMatch = null;
-    let bestScore = 0;
-
-    userEntries.forEach((entry, index) => {
-      const keyScore = similarityScore(normalizedTarget, entry.normalizedSection);
-      if (keyScore > bestScore) {
-        bestScore = keyScore;
-        bestMatch = { ...entry, index };
-      }
-    });
-
-    if (!bestMatch || bestScore < 60) {
-      issues.push({
-        section,
-        score: 0,
-        message: "Information absente ou mal identifiée dans le fichier fourni.",
-        expectedSnippet: expected,
-        receivedSnippet: '',
-      });
-      return;
-    }
-
-    unmatchedUserEntries.delete(bestMatch.index);
-
-    const fieldScore = similarityScore(expected, bestMatch.value);
-    cumulatedScore += fieldScore;
-
-    if (fieldScore < 70) {
-      issues.push({
-        section,
-        score: Number(fieldScore.toFixed(1)),
-        message: 'Contenu incomplet ou divergences significatives par rapport à la référence.',
-        expectedSnippet: expected,
-        receivedSnippet: bestMatch.value,
-      });
-    } else if (fieldScore < 90) {
-      issues.push({
-        section,
-        score: Number(fieldScore.toFixed(1)),
-        message: 'Informations partiellement conformes (vérifier les détails et la formulation).',
-        expectedSnippet: expected,
-        receivedSnippet: bestMatch.value,
-      });
-    }
-
-    if (extras && Object.keys(extras).length > 0) {
-      const expectedExtras = Object.entries(extras)
-        .map(([key, value]) => `${key}: ${value}`)
-        .join(' | ');
-      issues.push({
-        section: `${section} — éléments complémentaires`,
-        score: fieldScore >= 80 ? 100 : Number(fieldScore.toFixed(1)),
-        message: `Attendu également: ${expectedExtras}`,
-        expectedSnippet: expectedExtras,
-        receivedSnippet: '',
-      });
-    }
-  });
-
-  const completenessScore = (cumulatedScore / referenceEntries.length) || 0;
-
-  if (unmatchedUserEntries.size > 0) {
-    unmatchedUserEntries.forEach((index) => {
-      const entry = userEntries[index];
-      issues.push({
-        section: entry.section,
-        score: 50,
-        message: "Section non reconnue dans la référence. Vérifiez l'intitulé ou l'association.",
-        expectedSnippet: '',
-        receivedSnippet: entry.value,
-      });
-    });
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY non configurée');
   }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  // Construire une représentation texte de l'Excel utilisateur
+  const userExcelText = userEntries
+    .map((entry) => `"${entry.section}": "${entry.value}"`)
+    .join('\n');
+
+  // Construire la liste des items de référence
+  const referenceItems = referenceEntries
+    .map((ref, index) => {
+      return `${index + 1}. Section attendue: "${ref.section}"
+   Valeur attendue: "${ref.expected}"
+   ${ref.extras && Object.keys(ref.extras).length > 0 ? `Infos complémentaires: ${JSON.stringify(ref.extras)}` : ''}`;
+    })
+    .join('\n\n');
+
+  const prompt = `Tu es un auditeur ULTRA-STRICT en conformité de sécurité chantier. Tu dois vérifier si un fichier Excel utilisateur contient EXACTEMENT les mêmes informations factuelles que le RÉFÉRENTIEL.
+
+**RÈGLE ABSOLUE** : Seule la reformulation LEXICALE est autorisée (synonymes). Toute différence de SENS, de FAIT, d'EXIGENCE ou de STATUT = score 0%.
+
+RÉFÉRENTIEL (${referenceEntries.length} items obligatoires):
+${referenceItems}
+
+FICHIER EXCEL UTILISATEUR:
+${userExcelText}
+
+GRILLE DE SCORING ULTRA-STRICTE:
+
+**Score 0% (NON-CONFORME TOTAL):**
+- Information ABSENTE
+- Information OPPOSÉE sur les faits (ex: "Non signalée" ≠ "Présence confirmée")
+- Changement de STATUT (ex: "Obligatoire" ≠ "Recommandé", "Interdit" ≠ "Autorisé")
+- Changement de PROCÉDURE (ex: "Séparé" ≠ "Centralisé", "Étanche" ≠ "Sol nu")
+- Changement de PORTÉE (ex: "En tout temps" ≠ "Phases critiques seulement")
+- Information INCOMPLÈTE sur un élément de sécurité CRITIQUE
+
+**Score 95-100% (CONFORME):**
+- Information IDENTIQUE au niveau du sens ET des faits
+- Reformulation lexicale acceptée UNIQUEMENT si le sens est strictement identique
+- Exemples acceptables:
+  * "Description sommaire du chantier" ≈ "Aperçu général des travaux" (même concept, aucune info perdue)
+  * "Sans objet" ≈ "N/A" ≈ "Non applicable" (strictement équivalent)
+  * "Port du casque obligatoire en tout temps" ≈ "Casque requis en permanence" (même obligation, même portée)
+
+EXEMPLES DE SCORING (À SUIVRE ABSOLUMENT):
+
+EXEMPLE 1 - Score 0%:
+- Référence: "Port du casque, gilet fluorescent et chaussures de sécurité obligatoire en tout temps."
+- Utilisateur: "Équipements recommandés uniquement lors des phases critiques."
+- Score: 0% (obligatoire ≠ recommandé, tout temps ≠ phases critiques = changement de statut ET de portée)
+- Message: "Non-conformité totale: obligations de sécurité remplacées par recommandations ponctuelles"
+
+EXEMPLE 2 - Score 0%:
+- Référence: "Gestion séparée des huiles, carburants et bétons ; zone de remplissage étanche."
+- Utilisateur: "Gestion centralisée sans séparation des produits ; stockage temporaire sur sol nu."
+- Score: 0% (séparée ≠ centralisée, étanche ≠ sol nu = procédures opposées)
+- Message: "Non-conformité totale: procédure de séparation ignorée, zone étanche absente"
+
+EXEMPLE 3 - Score 0%:
+- Référence: "Non signalée dans les documents. Vigilance en cas de découverte fortuite (procédure stop-work)."
+- Utilisateur: "Présence confirmée selon rapport externe. Vigilance en cas de découverte fortuite (procédure stop-work)."
+- Score: 0% (Non signalée ≠ Présence confirmée = FAITS OPPOSÉS, implique protocoles totalement différents)
+- Message: "Non-conformité totale: statut amiante opposé au référentiel (signalée vs non signalée), protocoles de sécurité incompatibles"
+
+EXEMPLE 4 - Score 100%:
+- Référence: "Sans objet (pas de réseaux ECS)"
+- Utilisateur: "N/A - aucun réseau ECS présent"
+- Score: 100% (équivalence stricte, même fait)
+- Message: "Conforme"
+
+EXEMPLE 5 - Score 100%:
+- Référence: "Maintien accès usagers TEC et riverains durant travaux"
+- Utilisateur: "Assurer la continuité d'accès pour les usagers TEC et les riverains pendant les travaux"
+- Score: 100% (reformulation parfaite, même exigence)
+- Message: "Conforme"
+
+CONSIGNES CRITIQUES:
+1. LIS CHAQUE VALEUR ATTENDUE **MOT PAR MOT**
+2. LIS CHAQUE VALEUR UTILISATEUR **MOT PAR MOT**
+3. COMPARE LES **FAITS**, pas les mots
+4. Si tu hésites entre 0% et 100%, choisis 0% (principe de sécurité maximale)
+5. Tout changement de fait, statut, exigence, portée = 0% AUTOMATIQUEMENT
+6. N'utilise JAMAIS de scores intermédiaires (50%, 70%) sauf si vraiment justifié
+
+IMPORTANT - CAS PIÈGES FRÉQUENTS:
+- "Obligatoire" vs "Recommandé" = 0% (changement de statut)
+- "Non signalée" vs "Présence confirmée" = 0% (faits opposés)
+- "En tout temps" vs "Pendant phases critiques" = 0% (changement de portée)
+- "Séparé" vs "Centralisé" = 0% (changement de procédure)
+- Élément manquant dans liste de sécurité = 0% (incomplet)
+
+RÉPONSE ATTENDUE (JSON strict, aucun texte avant ou après):
+{
+  "items": [
+    {
+      "section": "1.5 Amiante",
+      "score": 0,
+      "message": "Non-conformité totale: statut amiante opposé (signalée vs non signalée)",
+      "userSection": "Amiante",
+      "userValue": "Présence confirmée selon rapport externe"
+    },
+    ...
+  ]
+}
+
+Analyse TOUS les ${referenceEntries.length} items avec RIGUEUR MAXIMALE. En cas de doute, choisis 0%.`;
+
+  const result = await model.generateContent(prompt);
+  const response = result.response;
+  const text = response.text();
+
+  // Extraction du JSON
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error('Format de réponse Gemini invalide');
+  }
+
+  const geminiResult = JSON.parse(jsonMatch[0]);
+
+  // Transformation au format attendu
+  const issues = geminiResult.items.map((item) => ({
+    section: item.section,
+    score: Math.max(0, Math.min(100, item.score)),
+    message: item.message || '',
+    expectedSnippet: referenceEntries.find((ref) => ref.section === item.section)?.expected || '',
+    receivedSnippet: item.userValue || '',
+  }));
+
+  const totalScore = issues.reduce((sum, item) => sum + item.score, 0);
+  const avgScore = issues.length > 0 ? totalScore / issues.length : 0;
 
   issues.sort((a, b) => a.score - b.score);
 
   return {
-    score: Number(completenessScore.toFixed(1)),
+    score: Number(avgScore.toFixed(1)),
     details: issues,
   };
 };
@@ -286,7 +292,7 @@ export const handler = async (event) => {
 
     const buffer = Buffer.from(fileContent, 'base64');
     const userEntries = parseUserWorkbook(buffer);
-    const comparison = buildComparison(userEntries);
+    const comparison = await buildComparisonWithGemini(userEntries);
 
     const summaryItems = comparison.details
       .slice(0, 5)

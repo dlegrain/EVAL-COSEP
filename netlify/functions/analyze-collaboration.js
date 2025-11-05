@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import { google } from 'googleapis';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const clamp = (value, min = 0, max = 5) => Math.max(min, Math.min(max, value));
 
@@ -210,7 +211,167 @@ const parseTranscript = (transcript) => {
   };
 };
 
-const evaluateTranscript = (transcript) => {
+const evaluateWithGemini = async (transcript, metrics) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY non configurée');
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  const prompt = `Tu es un expert en collaboration humain–IA. Tu dois analyser EN DÉTAIL et EXHAUSTIVEMENT cette conversation entre un utilisateur et une IA.
+
+IMPORTANT : Lis TOUT le transcript du début à la fin. Ton analyse doit être RICHE et APPROFONDIE, pas superficielle. Ne te contente pas de survoler, examine chaque interaction.
+
+TRANSCRIPT:
+${transcript}
+
+MÉTRIQUES DE BASE (informatives):
+- Tours totaux: ${metrics.totalTurns}
+- Tours utilisateur: ${metrics.userTurns}
+- Mots utilisateur: ${metrics.totalUserWords}
+- Questions: ${metrics.totalQuestions}
+
+CRITÈRES D'ÉVALUATION (0-5):
+
+1. **Clarté de l'intention** (clarity):
+   - 0-1: Aucun contexte, demande floue tout au long de la conversation
+   - 2-3: Contexte partiel, objectif vague ou explicité tardivement
+   - 4-5: Objectif clair, contraintes explicites, contexte complet (rôle utilisateur, rôle IA, but poursuivi)
+   Analyse TOUT le transcript : L'utilisateur a-t-il clairement expliqué son rôle, le rôle attendu de l'IA, le contexte du projet, et le but final recherché ? Regarde au-delà du premier prompt.
+
+2. **Qualité du dialogue** (dialogue):
+   - 0-1: Monologue, pas d'itération
+   - 2-3: Quelques échanges, peu de rebonds
+   - 4-5: Dialogue riche, relances pertinentes, construction progressive
+   Analyse: L'utilisateur rebondit-il sur les réponses de l'IA ? Y a-t-il une vraie conversation ?
+
+3. **Conseils & angles** (advice):
+   - 0-1: Aucune demande de conseil, approche unique
+   - 2-3: Quelques questions ouvertes
+   - 4-5: Exploration active d'alternatives, demande d'avis critique, comparaisons
+   Analyse: L'utilisateur sollicite-t-il des perspectives variées et des conseils stratégiques ?
+
+4. **Réaction aux suggestions** (reaction):
+   - 0-1: Ignore les propositions de l'IA
+   - 2-3: Accuse réception sans exploiter
+   - 4-5: Intègre, discute, développe, questionne les idées proposées
+   Analyse: L'utilisateur exploite-t-il réellement les suggestions de l'IA ? Les intègre-t-il dans la suite ?
+
+5. **Richesse des requêtes** (richness):
+   - 0-1: Prompts très courts, télégraphiques, sans contexte
+   - 2-3: Prompts basiques mais complets
+   - 4-5: Prompts détaillés, contextualisés, nuancés, structurés
+   Analyse: Les prompts sont-ils construits, informatifs et bien rédigés ?
+
+6. **Niveau de délégation** (delegation):
+   - 0-1: Demandes purement exécutives (résume, liste, copie, transcris)
+   - 2-3: Mix exécution/réflexion
+   - 4-5: Tâches cognitives dominantes (analyse, évalue, compare, structure, diagnostique, priorise)
+   Analyse: L'utilisateur délègue-t-il des tâches analytiques et stratégiques ou juste de l'exécution mécanique ?
+
+CONSIGNES STRICTES:
+- LIS ABSOLUMENT TOUT LE TRANSCRIPT EN DÉTAIL, du premier au dernier mot
+- Base-toi sur le contenu réel et les comportements observés, pas uniquement sur les métriques quantitatives
+- Identifie des exemples concrets (extraits courts) qui justifient tes scores
+- Sois CRITIQUE et FACTUEL, pas encourageant artificiellement
+- COHÉRENCE : deux utilisateurs avec des comportements similaires doivent avoir des scores proches
+- Ne survole pas : l'analyse doit refléter une lecture complète et attentive
+
+RÉPONSE ATTENDUE (JSON strict, aucun texte avant ou après):
+{
+  "scores": {
+    "clarity": { "score": 3.5, "comment": "Bref commentaire factuel", "example": "Extrait pertinent court" },
+    "dialogue": { "score": 4.2, "comment": "...", "example": "..." },
+    "advice": { "score": 2.1, "comment": "...", "example": "..." },
+    "reaction": { "score": 3.8, "comment": "...", "example": "..." },
+    "richness": { "score": 2.9, "comment": "...", "example": "..." },
+    "delegation": { "score": 4.0, "comment": "...", "example": "..." }
+  },
+  "strengths": ["Point fort concret 1", "Point fort concret 2"],
+  "improvements": ["Axe amélioration précis 1", "Axe amélioration précis 2"],
+  "tips": ["Conseil actionnable 1", "Conseil actionnable 2", "Conseil actionnable 3"]
+}`;
+
+  const result = await model.generateContent(prompt);
+  const response = result.response;
+  const text = response.text();
+
+  // Extraction du JSON (au cas où Gemini ajoute du texte autour)
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error('Format de réponse Gemini invalide');
+  }
+
+  const geminiResult = JSON.parse(jsonMatch[0]);
+
+  // Transformation au format attendu par le front
+  const categories = {
+    clarity: {
+      label: "Clarté de l'intention",
+      score: clamp(geminiResult.scores.clarity.score),
+      comment: geminiResult.scores.clarity.comment,
+      example: geminiResult.scores.clarity.example,
+    },
+    dialogue: {
+      label: 'Qualité du dialogue',
+      score: clamp(geminiResult.scores.dialogue.score),
+      comment: geminiResult.scores.dialogue.comment,
+      example: geminiResult.scores.dialogue.example,
+    },
+    advice: {
+      label: 'Conseils & angles',
+      score: clamp(geminiResult.scores.advice.score),
+      comment: geminiResult.scores.advice.comment,
+      example: geminiResult.scores.advice.example,
+    },
+    reaction: {
+      label: 'Réaction aux suggestions',
+      score: clamp(geminiResult.scores.reaction.score),
+      comment: geminiResult.scores.reaction.comment,
+      example: geminiResult.scores.reaction.example,
+    },
+    richness: {
+      label: 'Richesse des requêtes',
+      score: clamp(geminiResult.scores.richness.score),
+      comment: geminiResult.scores.richness.comment,
+      example: geminiResult.scores.richness.example,
+    },
+    delegation: {
+      label: 'Niveau de délégation',
+      score: clamp(geminiResult.scores.delegation.score),
+      comment: geminiResult.scores.delegation.comment,
+      example: geminiResult.scores.delegation.example,
+    },
+  };
+
+  const overall = clamp(
+    (categories.clarity.score +
+      categories.dialogue.score +
+      categories.advice.score +
+      categories.reaction.score +
+      categories.richness.score +
+      categories.delegation.score) /
+      6,
+    0,
+    5
+  );
+
+  return {
+    metrics,
+    scores: categories,
+    overall,
+    advice: {
+      strengths: geminiResult.strengths || [],
+      improvements: geminiResult.improvements || [],
+      tips: geminiResult.tips || [],
+    },
+  };
+};
+
+const evaluateTranscriptHeuristic = (transcript) => {
   const parsed = parseTranscript(transcript);
   const { turns, userTurns, assistantTurns, totalTurns, totalUserWords, uniqueUserWords, totalQuestions } = parsed;
 
@@ -245,7 +406,7 @@ const evaluateTranscript = (transcript) => {
         }
       }
     }
-    return 'Peu de rebonds identifiés après les réponses de l’IA.';
+    return 'Peu de rebonds identifiés après les réponses de l\'IA.';
   })();
 
   const advicePrompts = userTurns.filter((turn) => {
@@ -265,7 +426,7 @@ const evaluateTranscript = (transcript) => {
   const adviceComment = `${advicePrompts.length} sollicitation${advicePrompts.length > 1 ? 's' : ''} de conseils / angles.`;
   const adviceExample = advicePrompts.length
     ? `Exemple : « ${excerpt(advicePrompts[0].text, 160)} »`
-    : 'Aucune demande explicite de conseils ou d’alternatives.';
+    : 'Aucune demande explicite de conseils ou d\'alternatives.';
 
   const acknowledgementRegex = /(merci|parfait|je\s+vais|je\s+vais\s+tester|je\s+vais\s+appliquer|je\s+reprends|je\s+ret[iy]ens|je\s+choisis|allons-y|d'accord|ça marche|je valide|ok|bien\s+compris|entendu)/i;
   const reactionPairs = assistantTurns
@@ -302,7 +463,7 @@ const evaluateTranscript = (transcript) => {
     ? `Suivi : « ${excerpt(reactionPositive[0].assistant.text, 70)} » → « ${excerpt(reactionPositive[0].user.text, 70)} ». `
     : reactionMinimal.length
     ? `Suggestion peu exploitée : « ${excerpt(reactionMinimal[0].assistant.text, 70)} » → « ${excerpt(reactionMinimal[0].user.text, 60)} ». `
-    : 'Peu de traces de validation ou d’application des idées proposées.';
+    : 'Peu de traces de validation ou d\'application des idées proposées.';
 
   const avgWordsPerPrompt = userTurns.length ? totalUserWords / userTurns.length : 0;
   const lexicalVariety = totalUserWords ? uniqueUserWords / totalUserWords : 0;
@@ -327,7 +488,7 @@ const evaluateTranscript = (transcript) => {
     0
   );
   const delegationScore = clamp(1 + cognitiveHits * 0.9 + Math.min(totalQuestions, 5) * 0.2 - executionHits * 0.6);
-  const delegationComment = `${cognitiveHits} requête${cognitiveHits > 1 ? 's' : ''} cognitives vs ${executionHits} demande${executionHits > 1 ? 's' : ''} d’exécution.`;
+  const delegationComment = `${cognitiveHits} requête${cognitiveHits > 1 ? 's' : ''} cognitives vs ${executionHits} demande${executionHits > 1 ? 's' : ''} d'exécution.`;
   const delegationExample = (() => {
     if (cognitiveHits > 0) {
       const turn = userTurns.find((t) => cognitiveVerbs.some((verb) => t.text.toLowerCase().includes(verb)));
@@ -346,7 +507,7 @@ const evaluateTranscript = (transcript) => {
 
   const categories = {
     clarity: {
-      label: "Clarté de l’intention",
+      label: "Clarté de l'intention",
       score: clarityScore,
       comment: clarityComment,
       example: clarityExample,
@@ -405,11 +566,11 @@ const evaluateTranscript = (transcript) => {
 
   const tips = [];
   if (categories.clarity.score < 4) tips.push('Commencer vos échanges par une formulation explicite du livrable attendu et des contraintes.');
-  if (categories.dialogue.score < 4) tips.push('Multiplier les relances ciblées : “propose un autre angle”, “que se passe-t-il si…”.');
+  if (categories.dialogue.score < 4) tips.push('Multiplier les relances ciblées : "propose un autre angle", "que se passe-t-il si…".');
   if (categories.advice.score < 4) tips.push('Explorer plusieurs alternatives et demander des comparaisons argumentées.');
   if (categories.reaction.score < 4) tips.push("Valider ou écarter explicitement les pistes données par l'IA et expliquer vos choix.");
-  if (categories.richness.score < 4) tips.push('Préparer vos prompts en listant contexte, contraintes, format attendu avant de solliciter l’IA.');
-  if (categories.delegation.score < 4) tips.push('Confier des tâches analytiques à l’IA (diagnostics, matrices de décision) plutôt que de simples résumés.');
+  if (categories.richness.score < 4) tips.push('Préparer vos prompts en listant contexte, contraintes, format attendu avant de solliciter l\'IA.');
+  if (categories.delegation.score < 4) tips.push('Confier des tâches analytiques à l\'IA (diagnostics, matrices de décision) plutôt que de simples résumés.');
 
   return {
     metrics: {
@@ -423,6 +584,30 @@ const evaluateTranscript = (transcript) => {
     overall,
     advice: { strengths, improvements, tips },
   };
+};
+
+const evaluateTranscript = async (transcript) => {
+  const parsed = parseTranscript(transcript);
+  const { totalTurns, totalUserWords, uniqueUserWords, totalQuestions } = parsed;
+  const { userTurns } = parsed;
+
+  const metrics = {
+    totalTurns,
+    userTurns: userTurns.length,
+    totalUserWords,
+    uniqueUserWords,
+    totalQuestions,
+    avgWordsPerPrompt: userTurns.length ? totalUserWords / userTurns.length : 0,
+  };
+
+  try {
+    // Tenter l'analyse avec Gemini
+    return await evaluateWithGemini(transcript, metrics);
+  } catch (error) {
+    console.warn('Analyse Gemini échouée, fallback sur analyse heuristique:', error.message);
+    // Fallback sur analyse heuristique
+    return evaluateTranscriptHeuristic(transcript);
+  }
 };
 
 const storeTranscript = async (firstName, lastName, transcript) => {
@@ -498,7 +683,7 @@ export const handler = async (event) => {
       return { statusCode: 400, body: "Champs requis manquants (prénom, nom, transcript)." };
     }
 
-    const evaluation = evaluateTranscript(transcript);
+    const evaluation = await evaluateTranscript(transcript);
 
     const summary = Object.values(evaluation.scores)
       .sort((a, b) => a.score - b.score)

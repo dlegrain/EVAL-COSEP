@@ -8,3 +8,6 @@ dist/
 # Misc
 .DS_Store
 .vscode/
+
+# Local environment (do not commit secrets)
+.env
