@@ -3,10 +3,9 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
 const STORAGE_KEYS = {
+  email: 'eval-cosep:email',
   firstName: 'eval-cosep:firstName',
   lastName: 'eval-cosep:lastName',
-  currentView: 'eval-cosep:currentView',
-  currentModule: 'eval-cosep:currentModule',
 };
 
 const DOCUMENT_LINKS = [
@@ -46,11 +45,19 @@ const getScoreColor = (score) => {
   return '#ef4444'; // rouge
 };
 
+const isValidEmail = (value = '') => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
 export default function App() {
+  const [email, setEmail] = useState(() => localStorage.getItem(STORAGE_KEYS.email) || '');
   const [firstName, setFirstName] = useState(() => localStorage.getItem(STORAGE_KEYS.firstName) || '');
   const [lastName, setLastName] = useState(() => localStorage.getItem(STORAGE_KEYS.lastName) || '');
-  const [currentView, setCurrentView] = useState(() => localStorage.getItem(STORAGE_KEYS.currentView) || 'identify');
-  const [currentModule, setCurrentModule] = useState(() => localStorage.getItem(STORAGE_KEYS.currentModule) || null);
+  const [currentView, setCurrentView] = useState('identify');
+  const [currentModule, setCurrentModule] = useState(null);
+  const [user, setUser] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [authStatus, setAuthStatus] = useState('idle');
+  const [authError, setAuthError] = useState('');
+  const [progressError, setProgressError] = useState('');
 
   const participantLabel = useMemo(() => `${firstName.trim()} ${lastName.trim()}`.trim(), [firstName, lastName]);
 
@@ -106,6 +113,10 @@ export default function App() {
   }, [module3StartTime]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.email, email);
+  }, [email]);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.firstName, firstName);
   }, [firstName]);
 
@@ -113,27 +124,137 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.lastName, lastName);
   }, [lastName]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.currentView, currentView);
-  }, [currentView]);
+  const canStartApp = isValidEmail(email) && firstName.trim().length > 0 && lastName.trim().length > 0;
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.currentModule, currentModule || '');
-  }, [currentModule]);
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    if (!canStartApp || authStatus === 'working') return;
+    setAuthStatus('working');
+    setAuthError('');
+    try {
+      const response = await fetch('/.netlify/functions/get-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+        }),
+      });
 
-  const canStartApp = firstName.trim().length > 0 && lastName.trim().length > 0;
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Connexion impossible pour le moment.');
+      }
 
-  const handleStartApp = () => {
-    if (!canStartApp) return;
-    setCurrentView('dashboard');
+      const data = await response.json();
+      const resolvedEmail = data.user?.email?.trim() || email.trim();
+      const resolvedFirstName = data.user?.firstName?.trim() || firstName.trim();
+      const resolvedLastName = data.user?.lastName?.trim() || lastName.trim();
+
+      setEmail(resolvedEmail);
+      setFirstName(resolvedFirstName);
+      setLastName(resolvedLastName);
+      setUser({
+        email: resolvedEmail,
+        firstName: resolvedFirstName,
+        lastName: resolvedLastName,
+      });
+      setProgress(data.progress || {});
+      setProgressError('');
+      setCurrentModule(null);
+      setCurrentView('dashboard');
+      setAuthStatus('success');
+      setAuthError('');
+    } catch (error) {
+      console.error('Login error:', error);
+      setAuthStatus('error');
+      setAuthError(error.message || 'Connexion impossible pour le moment.');
+    }
+  };
+
+  const resetModuleState = () => {
+    setModule1Started(false);
+    setModule1StartTime(null);
+    setModule1Elapsed(0);
+    setFile(null);
+    setStatus('idle');
+    setAnalysis(null);
+    setErrorMessage('');
+    setModule2Started(false);
+    setCollabText('');
+    setCollabStatus('idle');
+    setCollabError('');
+    setCollaboration(null);
+    setModule3Started(false);
+    setModule3StartTime(null);
+    setModule3Elapsed(0);
+    setLegalQ1('');
+    setLegalQ2('');
+    setLegalQ3('');
+    setLegalStatus('idle');
+    setLegalError('');
+    setLegalResult(null);
+    setModule4Started(false);
+    setCanvasFile(null);
+    setCanvasStatus('idle');
+    setCanvasError('');
+    setCanvasResult(null);
+  };
+
+  const handleLogout = () => {
+    resetModuleState();
+    setUser(null);
+    setProgress(null);
+    setCurrentModule(null);
+    setCurrentView('identify');
+    setAuthStatus('idle');
+    setAuthError('');
+    setProgressError('');
+  };
+
+  const persistModuleProgress = async (moduleId, updatePayload) => {
+    if (!user?.email) return { success: false };
+    try {
+      const response = await fetch('/.netlify/functions/update-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: user.email,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          updates: { [moduleId]: updatePayload },
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Sauvegarde impossible pour le moment.');
+      }
+      const data = await response.json();
+      setProgress(data.progress || {});
+      setProgressError('');
+      return { success: true };
+    } catch (error) {
+      console.error('Progress sync error:', error);
+      setProgressError("Sauvegarde Google Sheets indisponible. Merci de réessayer plus tard.");
+      return { success: false, error };
+    }
   };
 
   const openModule = (moduleId) => {
+    if (isModuleLocked(moduleId)) {
+      return;
+    }
     setCurrentModule(moduleId);
     setCurrentView('module-detail');
   };
 
   const startModule = (moduleId) => {
+    if (isModuleLocked(moduleId)) {
+      setCurrentView('dashboard');
+      setCurrentModule(null);
+      return;
+    }
     setCurrentView('module-active');
     if (moduleId === 'module1' && !module1Started) {
       setModule1Started(true);
@@ -153,52 +274,62 @@ export default function App() {
     setCurrentModule(null);
   };
 
+  const isModuleLocked = (moduleId) => progress?.[moduleId]?.status === 'completed';
+  const getModuleScore = (moduleId) => {
+    const entry = progress?.[moduleId];
+    return typeof entry?.score === 'number' ? entry.score : null;
+  };
+
   // Modules config
   const modules = [
     {
       id: 'module1',
       title: 'Extraction du cahier des charges',
       shortDesc: 'Analyse et extraction des données d\'un cahier des charges',
-      completed: !!analysis,
-      score: analysis?.score ?? null,
+      completed: isModuleLocked('module1') || !!analysis,
+      locked: isModuleLocked('module1'),
+      score: getModuleScore('module1') ?? (typeof analysis?.score === 'number' ? analysis.score : null),
       timeLimit: '30 minutes',
     },
     {
       id: 'module2',
       title: 'Collaboration humain–IA',
       shortDesc: 'Évaluation de la qualité du dialogue avec l\'IA',
-      completed: !!collaboration,
-      score: collaboration ? Math.round((collaboration.overall ?? 0) * 20) : null,
+      completed: isModuleLocked('module2') || !!collaboration,
+      locked: isModuleLocked('module2'),
+      score: getModuleScore('module2') ?? (collaboration ? Math.round((collaboration.overall ?? 0) * 20) : null),
       timeLimit: 'Pas de limite',
     },
     {
       id: 'module3',
       title: 'Législation (recherche)',
       shortDesc: 'Recherche et interprétation réglementaire',
-      completed: !!legalResult,
-      score: legalResult?.score ?? null,
+      completed: isModuleLocked('module3') || !!legalResult,
+      locked: isModuleLocked('module3'),
+      score: getModuleScore('module3') ?? (typeof legalResult?.score === 'number' ? legalResult.score : null),
       timeLimit: '10 minutes',
     },
     {
       id: 'module4',
       title: 'Preuve Canvas (ChatGPT)',
       shortDesc: 'Vérification de l\'accès à l\'outil Canvas',
-      completed: !!canvasResult,
-      score: canvasResult?.canvasDetected ? 100 : 0,
+      completed: isModuleLocked('module4') || !!canvasResult,
+      locked: isModuleLocked('module4'),
+      score: getModuleScore('module4') ?? (canvasResult ? (canvasResult.canvasDetected ? 100 : 0) : null),
       timeLimit: 'Pas de limite',
     },
   ];
 
   const currentModuleData = modules.find(m => m.id === currentModule);
-
-  // Handler de réinitialisation
-  const handleReset = () => {
-    if (confirm('Êtes-vous sûr de vouloir réinitialiser ? Toutes les données seront effacées.')) {
-      localStorage.clear();
-      window.location.reload();
-    }
+  const currentModuleCompleted = currentModule ? isModuleLocked(currentModule) : false;
+  const moduleLockedState = {
+    module1: isModuleLocked('module1'),
+    module2: isModuleLocked('module2'),
+    module3: isModuleLocked('module3'),
+    module4: isModuleLocked('module4'),
   };
 
+  // Handler de réinitialisation
   // Handlers Module 1
   const handleFileChange = (event) => {
     setFile(event.target.files?.[0] || null);
@@ -220,13 +351,14 @@ export default function App() {
     setErrorMessage('');
     try {
       const fileContent = await toBase64(file);
+      const submittedAt = Date.now();
       const payload = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         fileName: file.name,
         elapsedMs: module1Elapsed,
         startedAt: module1StartTime,
-        submittedAt: Date.now(),
+        submittedAt,
         fileContent,
       };
 
@@ -244,6 +376,14 @@ export default function App() {
       const result = await response.json();
       setAnalysis(result);
       setStatus('success');
+      if (user?.email) {
+        await persistModuleProgress('module1', {
+          status: 'completed',
+          score: result.score ?? null,
+          elapsedMs: module1Elapsed,
+          submittedAt,
+        });
+      }
     } catch (error) {
       console.error(error);
       setStatus('error');
@@ -300,12 +440,13 @@ export default function App() {
     setCollabError('');
 
     try {
+      const submittedAt = Date.now();
       const payload = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         transcript: collabText.trim(),
         extractionScore: analysis?.score ?? 0,
-        submittedAt: Date.now(),
+        submittedAt,
       };
 
       const response = await fetch('/.netlify/functions/analyze-collaboration', {
@@ -323,6 +464,13 @@ export default function App() {
       setCollaboration(result);
       setCollabStatus('success');
       setCollabError('');
+      if (user?.email) {
+        await persistModuleProgress('module2', {
+          status: 'completed',
+          score: Math.round((result.overall ?? 0) * 20),
+          submittedAt,
+        });
+      }
     } catch (error) {
       console.error(error);
       setCollabStatus('error');
@@ -335,13 +483,15 @@ export default function App() {
     setLegalStatus('working');
     setLegalError('');
     try {
+      const submittedAt = Date.now();
+      const elapsedMs = module3StartTime ? submittedAt - module3StartTime : 0;
       const payload = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         answers: { Q1: legalQ1, Q2: legalQ2, Q3: legalQ3 },
         startedAt: module3StartTime,
-        submittedAt: Date.now(),
-        elapsedMs: module3StartTime ? Date.now() - module3StartTime : 0,
+        submittedAt,
+        elapsedMs,
       };
       const res = await fetch('/.netlify/functions/evaluate-legal-training', {
         method: 'POST',
@@ -352,6 +502,14 @@ export default function App() {
       const json = await res.json();
       setLegalResult(json);
       setLegalStatus('success');
+      if (user?.email) {
+        await persistModuleProgress('module3', {
+          status: 'completed',
+          score: json.score ?? null,
+          elapsedMs,
+          submittedAt,
+        });
+      }
     } catch (err) {
       setLegalError(err.message || "Erreur pendant l'évaluation.");
       setLegalStatus('error');
@@ -374,11 +532,13 @@ export default function App() {
       setCanvasStatus('working');
       setCanvasError('');
       const fileContent = await toBase64(canvasFile);
+      const submittedAt = Date.now();
       const payload = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         imageContent: fileContent,
         mimeType: canvasFile.type || 'image/png',
+        submittedAt,
       };
       const res = await fetch('/.netlify/functions/detect-canvas-icon', {
         method: 'POST',
@@ -389,6 +549,13 @@ export default function App() {
       const json = await res.json();
       setCanvasResult(json);
       setCanvasStatus('success');
+      if (user?.email) {
+        await persistModuleProgress('module4', {
+          status: 'completed',
+          score: json.canvasDetected ? 100 : 0,
+          submittedAt,
+        });
+      }
     } catch (err) {
       setCanvasStatus('error');
       setCanvasError(err.message || 'Analyse impossible pour le moment.');
@@ -422,10 +589,10 @@ export default function App() {
     doc.text('Résumé des modules', marginX, cursorY);
     cursorY += 20;
 
-    const summaryRows = modules.map(m => [
+    const summaryRows = modules.map((m) => [
       m.title,
-      m.completed ? `${(m.score ?? 0).toFixed(1)}%` : 'Non réalisé',
-      m.completed ? '✓' : '—'
+      typeof m.score === 'number' ? `${m.score.toFixed(1)}%` : 'Non réalisé',
+      m.completed ? '✓' : '—',
     ]);
 
     doc.autoTable({
@@ -581,19 +748,32 @@ export default function App() {
           <div className="card">
             <h1>EVAL COSEP</h1>
             <p>Bienvenue dans l'évaluation COSEP. Identifiez-vous pour accéder aux modules.</p>
-            <div className="form-row">
+            <form className="form-vertical" onSubmit={handleLogin}>
               <label>
-                Prénom
-                <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+                Adresse email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="prenom.nom@exemple.com"
+                  required
+                />
               </label>
-              <label>
-                Nom
-                <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-              </label>
-            </div>
-            <button className="primary" type="button" onClick={handleStartApp} disabled={!canStartApp}>
-              Accéder aux modules
-            </button>
+              <div className="form-row">
+                <label>
+                  Prénom
+                  <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+                </label>
+                <label>
+                  Nom
+                  <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+                </label>
+              </div>
+              {authError && <p className="error-text">{authError}</p>}
+              <button className="primary" type="submit" disabled={!canStartApp || authStatus === 'working'}>
+                {authStatus === 'working' ? 'Connexion en cours...' : 'Accéder aux modules'}
+              </button>
+            </form>
           </div>
         </main>
       </div>
@@ -602,24 +782,29 @@ export default function App() {
 
   // Dashboard principal
   if (currentView === 'dashboard') {
-    const hasAnyResult = analysis || collaboration || legalResult || canvasResult;
+    const hasAnyResult = modules.some((module) => module.completed);
 
     return (
       <div className="layout">
         <main className="page">
           <div className="card">
             <h1>EVAL COSEP — Modules</h1>
-            <p className="participant-name">Participant: {participantLabel}</p>
+            <p className="participant-name">
+              Connecté en tant que <strong>{participantLabel}</strong> ({user?.email})
+            </p>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
               {hasAnyResult && (
                 <button type="button" className="primary download-main" onClick={handleDownloadPdf}>
                   Télécharger le rapport d'évaluation (PDF)
                 </button>
               )}
-              <button type="button" className="secondary" onClick={handleReset}>
-                Réinitialiser l'évaluation
+              <button type="button" className="secondary" onClick={handleLogout}>
+                Se déconnecter
               </button>
             </div>
+            {progressError && (
+              <p style={{ color: '#b45309', marginTop: '0.75rem' }}>{progressError}</p>
+            )}
           </div>
 
           <div className="modules-grid">
@@ -627,15 +812,15 @@ export default function App() {
               <div
                 key={module.id}
                 className={`module-card ${module.completed ? 'completed' : ''}`}
-                onClick={() => !module.completed && openModule(module.id)}
+                onClick={() => !module.locked && openModule(module.id)}
                 style={{
-                  cursor: module.completed ? 'not-allowed' : 'pointer',
-                  opacity: module.completed ? 0.7 : 1
+                  cursor: module.locked ? 'not-allowed' : 'pointer',
+                  opacity: module.locked ? 0.7 : 1
                 }}
               >
                 <div className="module-header">
                   <h3>{module.title}</h3>
-                  {module.completed && (
+                  {typeof module.score === 'number' && (
                     <div
                       className="module-score-badge"
                       style={{ backgroundColor: getScoreColor(module.score) }}
@@ -645,7 +830,11 @@ export default function App() {
                   )}
                 </div>
                 <p className="module-short-desc">{module.shortDesc}</p>
-                {module.completed && <div className="module-completed-label">✓ Terminé</div>}
+                {module.completed && (
+                  <div className="module-completed-label">
+                    ✓ Terminé {module.locked ? '(verrouillé)' : '(session en cours)'}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -663,7 +852,12 @@ export default function App() {
             <button className="back-button" onClick={backToDashboard}>← Retour au menu</button>
             <h1>{currentModuleData.title}</h1>
 
-            {currentModule === 'module1' && (
+            {currentModule === 'module1' && currentModuleCompleted && (
+              <div className="alert info">
+                Ce module a déjà été complété. Merci de revenir au menu pour consulter votre score.
+              </div>
+            )}
+            {currentModule === 'module1' && !currentModuleCompleted && (
               <>
                 <p>
                   Analysez les documents fournis et extrayez toutes les informations nécessaires.
@@ -687,7 +881,12 @@ export default function App() {
               </>
             )}
 
-            {currentModule === 'module2' && (
+            {currentModule === 'module2' && currentModuleCompleted && (
+              <div className="alert info">
+                Ce module a déjà été complété. Merci de revenir au menu pour consulter votre score.
+              </div>
+            )}
+            {currentModule === 'module2' && !currentModuleCompleted && (
               <>
                 <p>
                   Collez l'intégralité de votre échange avec une IA (ChatGPT, Gemini, etc.).
@@ -697,7 +896,12 @@ export default function App() {
               </>
             )}
 
-            {currentModule === 'module3' && (
+            {currentModule === 'module3' && currentModuleCompleted && (
+              <div className="alert info">
+                Ce module a déjà été complété. Merci de revenir au menu pour consulter votre score.
+              </div>
+            )}
+            {currentModule === 'module3' && !currentModuleCompleted && (
               <>
                 <p>
                   Recherchez et interprétez la réglementation relative à la formation de base en sécurité
@@ -708,7 +912,12 @@ export default function App() {
               </>
             )}
 
-            {currentModule === 'module4' && (
+            {currentModule === 'module4' && currentModuleCompleted && (
+              <div className="alert info">
+                Ce module a déjà été complété. Merci de revenir au menu pour consulter votre score.
+              </div>
+            )}
+            {currentModule === 'module4' && !currentModuleCompleted && (
               <>
                 <p>
                   Chargez une capture d'écran montrant la zone de saisie de ChatGPT.
@@ -744,19 +953,32 @@ export default function App() {
                 <p>Préparez votre analyse dans Excel et déposez votre fichier ci-dessous.</p>
               </div>
 
-              <div className="card">
-                <h3>Déposez votre fichier Excel</h3>
-                <form onSubmit={handleSubmitModule1}>
-                  <div className="upload-zone">
-                    <p>Glissez votre fichier Excel ici ou utilisez le sélecteur.</p>
-                    <input type="file" accept=".xls,.xlsx" onChange={handleFileChange} />
+              {!moduleLockedState.module1 && !analysis && (
+                <div className="card">
+                  <h3>Déposez votre fichier Excel</h3>
+                  <form onSubmit={handleSubmitModule1}>
+                    <div className="upload-zone">
+                      <p>Glissez votre fichier Excel ici ou utilisez le sélecteur.</p>
+                      <input type="file" accept=".xls,.xlsx" onChange={handleFileChange} />
+                    </div>
+                    <button className="primary pad-top" type="submit" disabled={status === 'working'}>
+                      {status === 'working' ? 'Analyse en cours…' : 'Lancer l\'analyse'}
+                    </button>
+                  </form>
+                  {errorMessage && <div className="error">{errorMessage}</div>}
+                </div>
+              )}
+
+              {moduleLockedState.module1 && !analysis && (
+                <div className="card">
+                  <div className="alert info">
+                    Ce module est verrouillé car une évaluation existe déjà. Retournez au menu pour consulter vos scores.
                   </div>
-                  <button className="primary pad-top" type="submit" disabled={status === 'working'}>
-                    {status === 'working' ? 'Analyse en cours…' : 'Lancer l\'analyse'}
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
                   </button>
-                </form>
-                {errorMessage && <div className="error">{errorMessage}</div>}
-              </div>
+                </div>
+              )}
 
               {analysis && (
                 <div className="card">
@@ -804,23 +1026,36 @@ export default function App() {
           {/* MODULE 2 */}
           {currentModule === 'module2' && (
             <>
-              <div className="card">
-                <h2>Module 2 — Collaboration humain–IA</h2>
-                <p>Collez ci-dessous l'intégralité de votre échange avec l'IA.</p>
-                <form onSubmit={handleSubmitModule2}>
-                  <textarea
-                    value={collabText}
-                    onChange={(e) => setCollabText(e.target.value)}
-                    onPaste={handleCollabPaste}
-                    placeholder="Collez ici votre conversation complète."
-                    rows={14}
-                  />
-                  <button className="primary" type="submit" disabled={collabStatus === 'working'}>
-                    {collabStatus === 'working' ? 'Analyse en cours…' : 'Analyser la collaboration'}
+              {!moduleLockedState.module2 && !collaboration && (
+                <div className="card">
+                  <h2>Module 2 — Collaboration humain–IA</h2>
+                  <p>Collez ci-dessous l'intégralité de votre échange avec l'IA.</p>
+                  <form onSubmit={handleSubmitModule2}>
+                    <textarea
+                      value={collabText}
+                      onChange={(e) => setCollabText(e.target.value)}
+                      onPaste={handleCollabPaste}
+                      placeholder="Collez ici votre conversation complète."
+                      rows={14}
+                    />
+                    <button className="primary" type="submit" disabled={collabStatus === 'working'}>
+                      {collabStatus === 'working' ? 'Analyse en cours…' : 'Analyser la collaboration'}
+                    </button>
+                  </form>
+                  {collabError && <div className="error">{collabError}</div>}
+                </div>
+              )}
+
+              {moduleLockedState.module2 && !collaboration && (
+                <div className="card">
+                  <div className="alert info">
+                    Ce module est verrouillé car une évaluation existe déjà. Retournez au menu pour consulter vos scores.
+                  </div>
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
                   </button>
-                </form>
-                {collabError && <div className="error">{collabError}</div>}
-              </div>
+                </div>
+              )}
 
               {collaboration && (
                 <div className="card">
@@ -857,37 +1092,50 @@ export default function App() {
           {/* MODULE 3 */}
           {currentModule === 'module3' && (
             <>
-              <div className="card">
-                <h2>Module 3 — Législation</h2>
-                <div className="timer">
-                  Temps écoulé: {formatDuration(module3Elapsed)} {module3Elapsed > TEN_MINUTES_MS ? '(hors délai)' : ''}
-                </div>
-                <p>Répondez aux 3 questions ci-dessous concernant la réglementation.</p>
+              {!moduleLockedState.module3 && !legalResult && (
+                <div className="card">
+                  <h2>Module 3 — Législation</h2>
+                  <div className="timer">
+                    Temps écoulé: {formatDuration(module3Elapsed)} {module3Elapsed > TEN_MINUTES_MS ? '(hors délai)' : ''}
+                  </div>
+                  <p>Répondez aux 3 questions ci-dessous concernant la réglementation.</p>
 
-                <div className="pad-top">
-                  <label>
-                    Q1 — Objectif et champ d'application (AR 7 avril 2023)
-                    <textarea rows={5} value={legalQ1} onChange={(e) => setLegalQ1(e.target.value)} placeholder="Votre réponse" />
-                  </label>
-                </div>
-                <div className="pad-top">
-                  <label>
-                    Q2 — Contenu et durée minimales (CP 124)
-                    <textarea rows={5} value={legalQ2} onChange={(e) => setLegalQ2(e.target.value)} placeholder="Votre réponse" />
-                  </label>
-                </div>
-                <div className="pad-top">
-                  <label>
-                    Q3 — Équivalences et dispenses (CCT + AR)
-                    <textarea rows={5} value={legalQ3} onChange={(e) => setLegalQ3(e.target.value)} placeholder="Votre réponse" />
-                  </label>
-                </div>
+                  <div className="pad-top">
+                    <label>
+                      Q1 — Objectif et champ d'application (AR 7 avril 2023)
+                      <textarea rows={5} value={legalQ1} onChange={(e) => setLegalQ1(e.target.value)} placeholder="Votre réponse" />
+                    </label>
+                  </div>
+                  <div className="pad-top">
+                    <label>
+                      Q2 — Contenu et durée minimales (CP 124)
+                      <textarea rows={5} value={legalQ2} onChange={(e) => setLegalQ2(e.target.value)} placeholder="Votre réponse" />
+                    </label>
+                  </div>
+                  <div className="pad-top">
+                    <label>
+                      Q3 — Équivalences et dispenses (CCT + AR)
+                      <textarea rows={5} value={legalQ3} onChange={(e) => setLegalQ3(e.target.value)} placeholder="Votre réponse" />
+                    </label>
+                  </div>
 
-                <button className="primary pad-top" type="button" disabled={legalStatus === 'working'} onClick={handleSubmitModule3}>
-                  {legalStatus === 'working' ? 'Évaluation en cours…' : 'Soumettre'}
-                </button>
-                {legalError && <div className="error">{legalError}</div>}
-              </div>
+                  <button className="primary pad-top" type="button" disabled={legalStatus === 'working'} onClick={handleSubmitModule3}>
+                    {legalStatus === 'working' ? 'Évaluation en cours…' : 'Soumettre'}
+                  </button>
+                  {legalError && <div className="error">{legalError}</div>}
+                </div>
+              )}
+
+              {moduleLockedState.module3 && !legalResult && (
+                <div className="card">
+                  <div className="alert info">
+                    Ce module est verrouillé car une évaluation existe déjà. Retournez au menu pour consulter vos scores.
+                  </div>
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
+                  </button>
+                </div>
+              )}
 
               {legalResult && (
                 <div className="card">
@@ -926,20 +1174,33 @@ export default function App() {
           {/* MODULE 4 */}
           {currentModule === 'module4' && (
             <>
-              <div className="card">
-                <h2>Module 4 — Preuve Canvas (ChatGPT)</h2>
-                <p>Chargez une capture d'écran montrant la zone de saisie de ChatGPT avec l'icône Canvas.</p>
-                <form onSubmit={handleSubmitModule4}>
-                  <div className="upload-zone">
-                    <p>Glissez votre capture ici ou utilisez le sélecteur.</p>
-                    <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleCanvasFileChange} />
+              {!moduleLockedState.module4 && !canvasResult && (
+                <div className="card">
+                  <h2>Module 4 — Preuve Canvas (ChatGPT)</h2>
+                  <p>Chargez une capture d'écran montrant la zone de saisie de ChatGPT avec l'icône Canvas.</p>
+                  <form onSubmit={handleSubmitModule4}>
+                    <div className="upload-zone">
+                      <p>Glissez votre capture ici ou utilisez le sélecteur.</p>
+                      <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleCanvasFileChange} />
+                    </div>
+                    <button className="primary pad-top" type="submit" disabled={canvasStatus === 'working'}>
+                      {canvasStatus === 'working' ? 'Analyse en cours…' : 'Vérifier'}
+                    </button>
+                  </form>
+                  {canvasError && <div className="error">{canvasError}</div>}
+                </div>
+              )}
+
+              {moduleLockedState.module4 && !canvasResult && (
+                <div className="card">
+                  <div className="alert info">
+                    Ce module est verrouillé car une évaluation existe déjà. Retournez au menu pour consulter vos scores.
                   </div>
-                  <button className="primary pad-top" type="submit" disabled={canvasStatus === 'working'}>
-                    {canvasStatus === 'working' ? 'Analyse en cours…' : 'Vérifier'}
+                  <button type="button" className="primary" onClick={backToDashboard}>
+                    Retour au menu
                   </button>
-                </form>
-                {canvasError && <div className="error">{canvasError}</div>}
-              </div>
+                </div>
+              )}
 
               {canvasResult && (
                 <div className="card">

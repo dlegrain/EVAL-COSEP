@@ -21,16 +21,26 @@ Plateforme d'évaluation modulaire destinée à mesurer les compétences d'un co
 - **Navigation modulaire** : Dashboard → Détail module → Module actif → Retour au dashboard
 - **Système de scoring visuel** : badges colorés (🟢 vert ≥95%, 🟠 orange 90-95%, 🔴 rouge <90%)
 - **Modules terminés désactivés** : empêche les tentatives multiples
+- **Sessions strictes** : une fois un module évalué, l'interface masque le formulaire et seul le retour au dashboard est possible (plus de bouton « réinitialiser » côté candidat)
 - **Rapport PDF unifié** : récapitulatif de tous les modules avec détails par section
+
+## 🔐 Gestion des sessions & progression
+
+- **Login** : email + prénom + nom → POST `/.netlify/functions/get-progress`. La fonction lit (ou crée) la ligne associée dans Google Sheets (`Progress`) et renvoie l'état des 4 modules.
+- **Feuille `Progress`** : colonnes `email`, `first_name`, `last_name`, puis pour chaque module `moduleX_status`, `moduleX_score`, `moduleX_elapsed_ms`, `moduleX_updated_at`. L'email (normalisé) est utilisé comme clé unique.
+- **Verrouillage automatique** : après chaque soumission réussie, le front appelle `/.netlify/functions/update-progress` qui ne modifie que les colonnes du module concerné. Les boutons du dashboard restent fermés pour les modules dont le statut est `completed`.
+- **Reconnexion** : un utilisateur peut quitter l'interface, revenir plus tard, saisir le même email et retrouver son état exact (colonnes existantes inchangées).
 
 ## ⚙️ Architecture technique
 
 - **Front** : React/Vite avec navigation par état (flat design moderne)
-- **Backend** : 4 Netlify Functions serverless
+- **Backend** : Netlify Functions serverless
   - `analyze-upload.js` : analyse Excel (module 1)
   - `analyze-collaboration.js` : évaluation dialogue IA (module 2)
   - `evaluate-legal-training.js` : correction questions législation (module 3)
   - `detect-canvas-icon.js` : détection Canvas via Gemini 2.0 Flash (module 4)
+  - `get-progress.js` : lecture/initialisation de la feuille Google Sheets `Progress`
+  - `update-progress.js` : mise à jour partielle des colonnes `moduleX_*`
 - **Stockage** : Netlify Blobs + Google Sheets (archivage et traçabilité)
 
 Une documentation plus exhaustive est disponible dans `docs/README.md`.
@@ -118,7 +128,7 @@ Les fonctions utilisent `@netlify/blobs` pour conserver des copies des fichiers 
 - `src/` : code React (UI, navigation modulaire, chronos, uploads)
 - `public/documents/` : documents mis à disposition des candidats (PDF)
 - `data/reference.json` : référentiel généré depuis l'Excel validé (module 1)
-- `netlify/functions/` : 4 fonctions serverless (analyse, collaboration, législation, Canvas)
+- `netlify/functions/` : fonctions serverless (analyse, collaboration, législation, Canvas, progression)
 - `reference-generator.js` : utilitaire pour mettre à jour `reference.json`
 - `docs/` : documentation détaillée (architecture, scoring, checklist de déploiement)
 

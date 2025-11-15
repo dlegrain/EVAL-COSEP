@@ -43,6 +43,17 @@ Flux principal :
 - `src/styles.css`
   - Styles génériques (layout `.page`, cartes `.card`, boutons).
   - `.timer` surligné en rouge lorsqu’on dépasse 30 minutes (condition via logique JS).
+  - Classes `.alert.info` pour indiquer qu’un module est verrouillé (formulaire masqué, seul le retour au dashboard reste possible).
+
+### 2.3 Identification & progression
+
+- **Formulaire de login** : email + prénom + nom → POST `/.netlify/functions/get-progress`.
+  - Si l’email est nouveau, la fonction crée une ligne dans l’onglet Google Sheets `Progress`.
+  - Les colonnes attendues : `email`, `first_name`, `last_name`, puis pour chaque module `moduleX_status`, `moduleX_score`, `moduleX_elapsed_ms`, `moduleX_updated_at`.
+- **Verrouillage UI** : le dashboard bloque les cartes dont `moduleX_status === 'completed'`.
+- **Formulaires masqués** : lorsque la progression signale `completed`, l’écran “module actif” affiche uniquement un message d’information + bouton “Retour au menu” (aucune possibilité de relancer la tâche).
+- **Sauvegarde** : après chaque analyse réussie (`analyze-upload`, `analyze-collaboration`, `evaluate-legal-training`, `detect-canvas-icon`), le front appelle `/.netlify/functions/update-progress` avec `updates: { moduleN: { status, score, elapsedMs, submittedAt } }`. La fonction fusionne uniquement les colonnes fournies sans toucher aux autres modules.
+- **Déconnexion** : un bouton “Se déconnecter” ramène l’utilisateur sur l’écran d’identification sans effacer la feuille Google Sheets.
 
 - `public/documents/`
   - Les PDF exposés : `cahier-des-charges.pdf` et `plan.pdf` (à remplacer par la version réelle).
